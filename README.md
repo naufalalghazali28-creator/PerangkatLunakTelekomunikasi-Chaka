@@ -34,7 +34,9 @@ cd PerangkatLunakTelekomunikasi-Chaka
 
 **2. Setup File Environment**
 Gandakan file konfigurasi:
+```bash
 cp .env.example .env
+```
 
 **3. Install Dependencies (Composer)**
 Jalankan perintah ini untuk mengunduh semua package Laravel melalui Docker container kecil:
