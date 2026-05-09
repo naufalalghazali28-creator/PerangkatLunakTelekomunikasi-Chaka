@@ -22,7 +22,7 @@ class DatabaseSeeder extends Seeder
         $user = User::factory()->create([
             'name' => 'Admin',
             'email' => 'admin@bems.id',
-            'password' => Hash::make('Ddw9889##'),
+            'password' => Hash::make('abcdef'),
         ]);
 
         $user->assignRole('admin');

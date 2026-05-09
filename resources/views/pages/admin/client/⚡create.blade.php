@@ -2,97 +2,72 @@
 
 use Livewire\Component;
 use App\Models\BEMS\Client;
-use Mary\Traits\Toast;
 use App\Models\User;
+use Mary\Traits\Toast;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Attributes\On;
 
 new class extends Component
 {
-    //
     use Toast;
+    
     public $enableClientCreate = false;
-    public $code;
-    public $name;
-    public $expirity;
+    public $code, $name, $expirity;
 
-    public function enableClientCreation(){
-        if($this->enableClientCreate == false){
-            $this->enableClientCreate = true;
-        }else{
-            $this->enableClientCreate = false;
-        }
+    // Listener untuk membuka form dari tombol di idx.blade.php
+    #[On('toggleCreateClient')]
+    public function toggleCreation(){
+        $this->enableClientCreate = !$this->enableClientCreate;
     }
 
     public function saveClient(){
         $this->validate([
-            'code' => 'required|string',
-            'name' => 'required|string',
-            'expirity' => 'required|date',
+            'code'      => 'required|string|unique:bems_clients,code',
+            'name'      => 'required|string',
+            'expirity'  => 'required|date',
         ]);
 
-        $user = User::create([
-            'name' => $this->code,
-            'email' => $this->code."@bems.id",
-            'password' => Hash::make($this->code."1809##")
-        ]);
+        $user = User::updateOrCreate(
+            ['email' => $this->code . "@bems.id"], 
+            [
+                'name' => $this->code, 
+                'password' => Hash::make($this->code . "1809##"),
+                'role' => 'client'
+            ]
+        );
 
         Client::create([
-            'code' => $this->code,
-            'name' => $this->name,
-            'user_id' => $user->id,
-            'expirity' => $this->expirity,
+            'code'      => $this->code,
+            'name'      => $this->name,
+            'user_id'   => $user->id,
+            'expirity'  => $this->expirity,
         ]);
 
-        $this->code = null;
-        $this->name = null;
-        $this->expirity = null;
+        $this->reset(['code', 'name', 'expirity']); 
         $this->success('Client data has been saved!');
+        $this->dispatch('refreshIndexClient'); 
+        $this->enableClientCreate = false; 
     }
-
-};
-?>
+}; ?>
 
 <div>
-    @if($enableClientCreate == false)
-        <div class="text-left">
-            <div class="flex flex-wrap -mx-3">
-                <div class="w-full max-w-full px-3 mb-6 sm:w-12/12 sm:flex-none xl:mb-0 xl:w-12/12 text-right">
-                    <x-button wire:click="enableClientCreation" label="Add Client" class="btn-success" />
+    {{-- Form ini hanya muncul jika tombol Add Client diklik --}}
+    @if($enableClientCreate)
+    <div class="text-left animate-in fade-in duration-300 my-4">
+        <x-card title="Add New Client" subtitle="Silakan isi data client baru" shadow separator>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <x-input wire:model="code" label="Code" placeholder="Nama Pendek" />
+                <x-input wire:model="name" label="Name" placeholder="Nama Lengkap" />
+                <div class="col-span-full md:col-span-1">
+                    <x-datetime label="Expiry Date" wire:model="expirity" icon="o-calendar" />
                 </div>
             </div>
-        </div>
-    @else
-        <div class="text-left">
-            <div class="flex flex-wrap -mx-3">
-                <div class="w-full max-w-full px-3 mb-6 sm:w-12/12 sm:flex-none xl:mb-0 xl:w-12/12">
-                    <x-card subtitle="Add client" shadow separator>
-                        <div class="text-left">
-                            <div class="flex flex-wrap -mx-3">
-                                <div class="w-full max-w-full px-3 mb-6 sm:w-3/12 sm:flex-none xl:mb-0 xl:w-3/12">
-                                    <x-input wire:model="code" label="Code" />
-                                </div>
-                                <div class="w-full max-w-full px-3 mb-6 sm:w-4/12 sm:flex-none xl:mb-0 xl:w-4/12">
-                                    <x-input wire:model="name" label="Name of client" />
-                                </div>
-                            </div>
-                            <div class="flex flex-wrap -mx-3">
-                                <div class="w-full max-w-full px-3 mb-6 sm:w-4/12 sm:flex-none xl:mb-0 xl:w-4/12">
-                                    <x-datetime label="My date" wire:model="expirity" />
-                                </div>
-                            </div>
-                            <br/>
-                            <div class="flex flex-wrap -mx-3">
-                                <div class="w-full max-w-full px-3 mb-6 sm:w-4/12 sm:flex-none xl:mb-0 xl:w-4/12">
-                                    <x-button wire:click="saveClient" class="btn-success" label="Save"/>
-                                    <x-button wire:click="enableClientCreation" class="btn-warning" label="Cancel"/>
-                                </div>
-                            </div>
-                        </div>
-                    </x-card>
-                </div>
-            </div>
-        </div>
-    @endif
 
-    {{-- When there is no desire, all things are at peace. - Laozi --}}
+            <x-slot:actions>
+                <x-button label="Cancel" wire:click="toggleCreation" class="btn-ghost" />
+                <x-button label="Save Client" wire:click="saveClient" class="btn-primary" spinner="saveClient" />
+            </x-slot:actions>
+        </x-card>
+    </div>
+    @endif
 </div>

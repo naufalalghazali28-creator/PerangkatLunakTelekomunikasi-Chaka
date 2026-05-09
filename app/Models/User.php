@@ -25,6 +25,8 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',        // Tambahkan ini agar bisa simpan peran staf
+        'parent_id',   //parent_id untuk menghubungkan staf dengan klien
     ];
 
     /**
