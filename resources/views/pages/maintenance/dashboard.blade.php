@@ -178,10 +178,6 @@ new class extends Component {
                             @endscope
 
                             @scope('cell_status', $sensor)
-                                <div class="flex items-center gap-2">
-                                    <div class="w-3 h-3 rounded-full {{ $sensor['status'] == 'Menyala' ? 'bg-success' : ($sensor['status'] == 'Trouble' ? 'bg-warning' : 'bg-error') }}" title="Status: {{ $sensor['status'] }}"></div>
-                                    <span class="text-sm font-medium">{{ $sensor['status'] }}</span>
-                                </div>
                                 <div class="w-4 h-4 rounded-full inline-block {{ $sensor['status'] == 'Menyala' ? 'bg-success' : ($sensor['status'] == 'Trouble' ? 'bg-warning' : 'bg-error') }}" title="Status: {{ $sensor['status'] }}"></div>
                             @endscope
                             
