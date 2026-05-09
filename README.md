@@ -27,9 +27,10 @@ Karena project ini menggunakan **Docker (Laravel Sail)**, kamu **TIDAK PERLU** m
 
 **1. Clone Repository**
 Unduh project ke komputer lokal dan masuk ke foldernya:
-
+```bash
 git clone [https://github.com/naufalalghazali28-creator/PerangkatLunakTelekomunikasi-Chaka.git](https://github.com/naufalalghazali28-creator/PerangkatLunakTelekomunikasi-Chaka.git)
 cd PerangkatLunakTelekomunikasi-Chaka
+```
 
 **2. Setup File Environment**
 Gandakan file konfigurasi:
@@ -37,24 +38,32 @@ cp .env.example .env
 
 **3. Install Dependencies (Composer)**
 Jalankan perintah ini untuk mengunduh semua package Laravel melalui Docker container kecil:
+```bash
 docker run --rm \
     -u "$(id -u):$(id -g)" \
     -v "$(pwd):/var/www/html" \
     -w /var/www/html \
     laravelsail/php84-composer:latest \
     composer install --ignore-platform-reqs
+```
 
 **4. Nyalakan Mesin Docker (Sail)**
 Jalankan aplikasi di background:
+```bash
 ./vendor/bin/sail up -d
+```
 
 **5. Setup Aplikasi Laravel**
 Buat key keamanan, lalu bangun struktur database beserta data bohongan (seeder):
+```bash
 ./vendor/bin/sail artisan key:generate
 ./vendor/bin/sail artisan migrate --seed
+```
 
 **6. Akses Aplikasi**
 Buka browser dan kunjungi:
+```bash
 http://localhost
+```
 
 Developoed by Muhammad Naufal Al Ghazali
