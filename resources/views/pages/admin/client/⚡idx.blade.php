@@ -173,8 +173,7 @@ new class extends Component
 }; ?>
 
 <div>
-    <x-card title="Admin | Client Management" shadow separator>
-        
+    <x-header title="Admin | Client Management" separator progress-indicator>
         <x-slot:actions>
             {{-- Tombol PDF, Excel, dan Add Client sejajar di pojok kanan atas --}}
             <x-button label="Import" icon="o-arrow-up-tray" wire:click="$set('importModal', true)" class="btn-outline btn-info btn-sm" />
@@ -184,12 +183,13 @@ new class extends Component
             </x-dropdown>
             <x-button label="Add Client" icon="o-plus" wire:click="$dispatch('toggleCreateClient')" class="btn-primary btn-sm" />
         </x-slot:actions>
+    </x-header>
 
         {{-- Panggil komponen create & edit di sini --}}
         <livewire:pages::admin.client.create />
         <livewire:pages::admin.client.edit />
         
-        <div class="mt-2">
+        <x-card shadow>
             {{-- Form pencarian realtime kita pindahkan ke sini agar muncul di atas tabel --}}
             <div class="mb-4">
                 <x-input icon="o-magnifying-glass" wire:model.live.debounce.500ms="search" placeholder="Cari nama atau kode client..." class="w-full sm:max-w-xs" clearable />
@@ -215,8 +215,7 @@ new class extends Component
                     </div>
                 @endscope
             </x-table>
-        </div>
-    </x-card>
+        </x-card>
 
     {{-- Modal Import Excel --}}
     <x-modal wire:model="importModal" title="Import Client Excel" class="backdrop-blur">

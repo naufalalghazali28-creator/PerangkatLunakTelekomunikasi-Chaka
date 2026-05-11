@@ -20,6 +20,12 @@ new class extends Component {
     // Variabel array untuk menampung simulasi data sensor yang baru saja didaftarkan
     public array $registeredSensors = [];
 
+    public function mount() {
+        // Mengambil data dari session berdasarkan user yang sedang login agar tidak tertukar
+        $sessionKey = 'registered_sensors_' . auth()->id();
+        $this->registeredSensors = session($sessionKey, []);
+    }
+
     public array $sensorHeaders = [
         ['key' => 'status', 'label' => 'Status'],
         ['key' => 'name', 'label' => 'Nama Sensor'],
@@ -136,6 +142,10 @@ new class extends Component {
             $this->success("Sensor '{$this->sensorName}' berhasil didaftarkan di ruangan yang dipilih!");
         }
         
+        // Simpan data array ke session spesifik milik user yang sedang login
+        $sessionKey = 'registered_sensors_' . auth()->id();
+        session([$sessionKey => $this->registeredSensors]);
+
         $this->reset(['sensorModal', 'selectedBuilding', 'selectedRoom', 'sensorName', 'sensorType']);
     }
 
@@ -178,7 +188,9 @@ new class extends Component {
                             @endscope
 
                             @scope('cell_status', $sensor)
-                                <div class="w-4 h-4 rounded-full inline-block {{ $sensor['status'] == 'Menyala' ? 'bg-success' : ($sensor['status'] == 'Trouble' ? 'bg-warning' : 'bg-error') }}" title="Status: {{ $sensor['status'] }}"></div>
+                                <div class="flex items-center mt-1">
+                                    <span class="inline-block w-4 h-4 rounded-full shadow-sm {{ $sensor['status'] == 'Menyala' ? 'bg-success' : ($sensor['status'] == 'Trouble' ? 'bg-warning' : 'bg-error') }}" title="Status: {{ $sensor['status'] }}">&nbsp;</span>
+                                </div>
                             @endscope
                             
                             @scope('cell_action', $sensor)
