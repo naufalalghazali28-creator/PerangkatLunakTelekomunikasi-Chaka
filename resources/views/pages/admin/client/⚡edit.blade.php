@@ -27,7 +27,7 @@ new class extends Component
                 $this->code = $client->code;
                 $this->name = $client->name;
                 $this->expirity = $client->expirity;
-                $this->clientEditModal = true;
+                $this->clientEditModal = false;
             }
         } else {
             // Jika tombol cancel ditekan

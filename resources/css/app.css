@@ -40,3 +40,29 @@
 .mary-table-pagination button {
     @apply cursor-pointer
 }
+
+/* =========================
+   LOGIN PAGE RESET
+========================= */
+
+.login-page button,
+.login-page input {
+    all: unset;
+    box-sizing: border-box;
+}
+
+.login-page input {
+    display: block;
+    width: 100%;
+}
+
+.login-page button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.login-page * {
+    box-sizing: border-box;
+}

@@ -132,7 +132,7 @@ new class extends Component {
                         <x-menu-item title="Export PDF" icon="o-document-text" wire:click="exportPdf" class="text-error" />
                         <x-menu-item title="Export Excel" icon="o-table-cells" wire:click="exportExcel" class="text-success" />
                     </x-dropdown>
-                    <x-button label="Add Operator" icon="o-plus" wire:click="$set('staffModal', true)" class="btn-primary btn-sm" />
+                    <x-button label="Add Operator" icon="o-plus" wire:click="$set('staffModal', false)" class="btn-primary btn-sm" />
                 </x-slot:actions>
             </x-header>
 
