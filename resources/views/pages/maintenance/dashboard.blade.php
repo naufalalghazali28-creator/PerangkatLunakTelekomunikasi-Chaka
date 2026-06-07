@@ -1,246 +1,173 @@
 <?php
 
 use Livewire\Component;
+use App\Models\BEMS\Node;
 use App\Models\BEMS\Building;
-use App\Models\BEMS\Room;
 use Livewire\Attributes\Computed;
 use Mary\Traits\Toast;
 
 new class extends Component {
     use Toast;
 
-    public bool $sensorModal = false;
-    public $editSensorId = null;
-
-    public $selectedBuilding = null;
-    public $selectedRoom = null;
-    public $sensorName = '';
-    public $sensorType = 'suhu';
-
-    // Variabel array untuk menampung simulasi data sensor yang baru saja didaftarkan
-    public array $registeredSensors = [];
-
-    public function mount() {
-        // Mengambil data dari session berdasarkan user yang sedang login agar tidak tertukar
-        $sessionKey = 'registered_sensors_' . auth()->id();
-        $this->registeredSensors = session($sessionKey, []);
+    #[Computed]
+    public function stats()
+    {
+        $nodes = Node::all();
+        return [
+            'total'    => $nodes->count(),
+            'active'   => $nodes->where('status', true)->count(),
+            'inactive' => $nodes->where('status', false)->count(),
+        ];
     }
 
-    public array $sensorHeaders = [
-        ['key' => 'status', 'label' => 'Status'],
-        ['key' => 'name', 'label' => 'Nama Sensor'],
-        ['key' => 'type', 'label' => 'Tipe Sensor'],
-        ['key' => 'building', 'label' => 'Gedung'],
-        ['key' => 'room', 'label' => 'Ruangan'],
-        ['key' => 'action', 'label' => 'Aksi'],
-    ];
-
+    // FIX: Group gedung by nama (case-insensitive) agar tidak duplikat
     #[Computed]
-    public function statusCount() {
-        $counts = ['menyala' => 0, 'mati' => 0, 'trouble' => 0];
-        foreach ($this->registeredSensors as $sensor) {
-            if ($sensor['status'] == 'Menyala') {
-                $counts['menyala']++;
-            } elseif ($sensor['status'] == 'Mati') {
-                $counts['mati']++;
-            } elseif ($sensor['status'] == 'Trouble') {
-                $counts['trouble']++;
-            }
-        }
-        return $counts;
-    }
-
-    #[Computed]
-    public function buildings() {
-        // Memperbaiki duplikasi gedung dengan mengabaikan huruf besar/kecil dan spasi
-        return Building::all()->groupBy(function($b) {
-            return strtolower(trim($b->name));
-        })->map(function($group) {
-            return [
-                'id' => $group->pluck('id')->implode(','), // Gabungkan semua ID jika nama gedungnya sama
-                'name' => trim($group->first()->name)
-            ];
-        })->values()->toArray();
-    }
-
-    #[Computed]
-    public function rooms() {
-        // Mengambil ruangan berdasarkan gedung yang dipilih (mendukung multi ID)
-        if ($this->selectedBuilding) {
-            $buildingIds = explode(',', $this->selectedBuilding);
-            return Room::whereIn('building_id', $buildingIds)->get()->map(function($r) {
+    public function buildings()
+    {
+        return Building::with(['rooms.nodes'])->get()
+            ->groupBy(fn($b) => strtolower(trim($b->name)))
+            ->map(function ($group) {
+                $nodes = $group->flatMap->rooms->flatMap->nodes;
                 return [
-                    'id' => $r->id,
-                    'name' => "Lantai {$r->floor} - {$r->name}"
+                    'name'     => trim($group->first()->name),
+                    'rooms'    => $group->sum(fn($b) => $b->rooms->count()),
+                    'total'    => $nodes->count(),
+                    'active'   => $nodes->where('status', true)->count(),
+                    'inactive' => $nodes->where('status', false)->count(),
                 ];
-            })->toArray();
-        }
-        return [];
+            })
+            ->values();
     }
 
-    public function updatedSelectedBuilding() {
-        // Reset pilihan ruangan setiap kali gedung diganti
-        $this->selectedRoom = null;
-    }
-
-    public function openAddModal() {
-        $this->reset(['editSensorId', 'selectedBuilding', 'selectedRoom', 'sensorName']);
-        $this->sensorType = 'suhu';
-        $this->sensorModal = true;
-    }
-
-    public function editSensor($id) {
-        $sensor = collect($this->registeredSensors)->firstWhere('id', $id);
-        if ($sensor) {
-            $this->editSensorId = $id;
-            $this->sensorName = $sensor['name'];
-            $this->sensorType = $sensor['type'];
-            $this->selectedBuilding = $sensor['building_id'];
-            $this->selectedRoom = $sensor['room_id'];
-            $this->sensorModal = true;
-        }
-    }
-
-    public function saveSensor() {
-        $this->validate([
-            'selectedBuilding' => 'required',
-            'selectedRoom' => 'required',
-            'sensorName' => 'required|min:3',
-            'sensorType' => 'required',
-        ]);
-
-        // Dapatkan nama gedung dan ruangan untuk ditampilkan di tabel
-        $buildingName = collect($this->buildings())->firstWhere('id', $this->selectedBuilding)['name'] ?? '-';
-        $roomName = collect($this->rooms())->firstWhere('id', $this->selectedRoom)['name'] ?? '-';
-
-        if ($this->editSensorId) {
-            // Proses pembaruan (Update)
-            foreach ($this->registeredSensors as $key => $sensor) {
-                if ($sensor['id'] === $this->editSensorId) {
-                    $this->registeredSensors[$key]['name'] = $this->sensorName;
-                    $this->registeredSensors[$key]['type'] = $this->sensorType;
-                    $this->registeredSensors[$key]['building_id'] = $this->selectedBuilding;
-                    $this->registeredSensors[$key]['building'] = $buildingName;
-                    $this->registeredSensors[$key]['room_id'] = $this->selectedRoom;
-                    $this->registeredSensors[$key]['room'] = $roomName;
-                    break;
-                }
-            }
-            $this->success("Sensor '{$this->sensorName}' berhasil diperbarui!");
-        } else {
-            // Proses pembuatan (Create)
-            array_unshift($this->registeredSensors, [
-                'id' => uniqid(),
-                'name' => $this->sensorName,
-                'type' => $this->sensorType,
-                'building_id' => $this->selectedBuilding,
-                'building' => $buildingName,
-                'room_id' => $this->selectedRoom,
-                'room' => $roomName,
-                'status' => 'Mati', // Default status saat pendaftaran (diubah operator nantinya)
-            ]);
-            $this->success("Sensor '{$this->sensorName}' berhasil didaftarkan di ruangan yang dipilih!");
-        }
-        
-        // Simpan data array ke session spesifik milik user yang sedang login
-        $sessionKey = 'registered_sensors_' . auth()->id();
-        session([$sessionKey => $this->registeredSensors]);
-
-        $this->reset(['sensorModal', 'selectedBuilding', 'selectedRoom', 'sensorName', 'sensorType']);
-    }
-
-    public function render() {
-        return <<<'HTML'
-        <div>
-            {{-- Header Halaman --}}
-            <x-header title="Dashboard Maintenance" subtitle="Pemantauan Perangkat Keras dan Sensor" separator progress-indicator>
-                <x-slot:actions>
-                    <x-button label="Daftarkan Sensor Baru" icon="o-plus" class="btn-primary btn-sm" wire:click="openAddModal" />
-                </x-slot:actions>
-            </x-header>
-
-            {{-- Konten Utama --}}
-            <div class="mb-4">
-                <x-card title="Status Sensor (Node)" subtitle="Ringkasan kondisi alat" shadow>
-                    <div class="flex justify-around items-center text-center mt-2">
-                        <div><div class="text-3xl font-bold text-success">{{ $this->statusCount['menyala'] }}</div><div class="text-sm opacity-70">Menyala</div></div>
-                        <div><div class="text-3xl font-bold text-error">{{ $this->statusCount['mati'] }}</div><div class="text-sm opacity-70">Mati</div></div>
-                        <div><div class="text-3xl font-bold text-warning">{{ $this->statusCount['trouble'] }}</div><div class="text-sm opacity-70">Trouble</div></div>
-                    </div>
-                </x-card>
-            </div>
-
-            {{-- Tabel Daftar Sensor yang Terdaftar (Preview Sementara) --}}
-            <div class="mt-6 animate-in slide-in-from-bottom-4 duration-500">
-                <x-card title="Sensor Baru Didaftarkan" subtitle="Daftar perangkat keras yang didaftarkan pada sesi ini" shadow separator>
-                    @if(count($registeredSensors) > 0)
-                        <x-table :headers="$sensorHeaders" :rows="$registeredSensors">
-                            @scope('cell_type', $sensor)
-                                @if($sensor['type'] == 'suhu')
-                                    <x-badge value="Suhu & Kelembaban" class="badge-info badge-outline" icon="o-cloud" />
-                                @elseif($sensor['type'] == 'listrik')
-                                    <x-badge value="Arus Listrik" class="badge-warning badge-outline" icon="o-bolt" />
-                                @elseif($sensor['type'] == 'cahaya')
-                                    <x-badge value="Cahaya" class="badge-success badge-outline" icon="o-sun" />
-                                @else
-                                    <x-badge value="Gerak (PIR)" class="badge-secondary badge-outline" icon="o-arrows-right-left" />
-                                @endif
-                            @endscope
-
-                            @scope('cell_status', $sensor)
-                                <div class="flex items-center mt-1">
-                                    <span class="inline-block w-4 h-4 rounded-full shadow-sm {{ $sensor['status'] == 'Menyala' ? 'bg-success' : ($sensor['status'] == 'Trouble' ? 'bg-warning' : 'bg-error') }}" title="Status: {{ $sensor['status'] }}">&nbsp;</span>
-                                </div>
-                            @endscope
-                            
-                            @scope('cell_action', $sensor)
-                                <x-button icon="o-pencil" wire:click="editSensor('{{ $sensor['id'] }}')" class="btn-ghost btn-sm text-info" />
-                            @endscope
-                        </x-table>
-                    @else
-                        <div class="text-center py-8 opacity-50">
-                            <x-icon name="o-inbox" class="w-12 h-12 mx-auto mb-2" />
-                            <p>Belum ada sensor yang didaftarkan. Silakan klik tombol <b>Daftarkan Sensor Baru</b>.</p>
-                        </div>
-                    @endif
-                </x-card>
-            </div>
-
-            {{-- Modal Tambah/Edit Sensor --}}
-            <x-modal wire:model="sensorModal" title="{{ $editSensorId ? 'Edit Data Sensor' : 'Daftarkan Sensor Baru' }}" separator>
-                <div class="space-y-4">
-                    <x-select 
-                        label="Pilih Gedung" 
-                        wire:model.live="selectedBuilding" 
-                        :options="$this->buildings" 
-                        placeholder="-- Pilih Gedung --" 
-                        icon="o-building-office" 
-                    />
-
-                    <x-select 
-                        label="Pilih Ruangan" 
-                        wire:model="selectedRoom" 
-                        :options="$this->rooms" 
-                        placeholder="-- Pilih Ruangan --" 
-                        icon="o-map-pin"
-                    />
-                    
-                    <x-input label="Nama Sensor" wire:model="sensorName" placeholder="Contoh: Sensor Suhu AC 1" icon="o-cpu-chip" />
-
-                    <x-select 
-                        label="Tipe Sensor" 
-                        wire:model="sensorType" 
-                        :options="[['id' => 'suhu', 'name' => 'Sensor Suhu & Kelembaban'], ['id' => 'listrik', 'name' => 'Sensor Arus Listrik'], ['id' => 'cahaya', 'name' => 'Sensor Intensitas Cahaya'], ['id' => 'gerak', 'name' => 'Sensor Gerak (PIR)']]" 
-                        icon="o-tag" 
-                    />
-                </div>
-                
-                <x-slot:actions>
-                    <x-button label="Batal" wire:click="$set('sensorModal', false)" />
-                    <x-button label="Simpan" wire:click="saveSensor" class="btn-primary" spinner="saveSensor" />
-                </x-slot:actions>
-            </x-modal>
-        </div>
-        HTML;
+    #[Computed]
+    public function recentNodes()
+    {
+        return Node::with('room.building')
+            ->latest()
+            ->take(5)
+            ->get();
     }
 }; ?>
+
+<div>
+    <x-header
+        title="Dashboard Maintenance"
+        subtitle="Pantau semua node yang terdaftar di setiap gedung"
+        separator
+        progress-indicator
+    >
+        <x-slot:actions>
+            <x-button label="Daftarkan Node" icon="o-plus" href="/maintenance/register-node" class="btn-primary btn-sm" />
+        </x-slot:actions>
+    </x-header>
+
+    {{-- STAT CARDS — jajar ke samping --}}
+    <div class="grid grid-cols-3 gap-4 mb-6">
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                    <x-icon name="o-server-stack" class="w-6 h-6 text-zinc-500 dark:text-zinc-400" />
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-zinc-900 dark:text-white">{{ $this->stats['total'] }}</p>
+                    <p class="text-xs text-zinc-500">Total Node</p>
+                </div>
+            </div>
+        </x-card>
+
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-green-500/10 flex items-center justify-center shrink-0">
+                    <x-icon name="o-check-circle" class="w-6 h-6 text-green-500" />
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-green-500">{{ $this->stats['active'] }}</p>
+                    <p class="text-xs text-zinc-500">Node Aktif</p>
+                </div>
+            </div>
+        </x-card>
+
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center shrink-0">
+                    <x-icon name="o-x-circle" class="w-6 h-6 text-red-500" />
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-red-500">{{ $this->stats['inactive'] }}</p>
+                    <p class="text-xs text-zinc-500">Node Nonaktif</p>
+                </div>
+            </div>
+        </x-card>
+    </div>
+
+    <div class="grid grid-cols-5 gap-4">
+
+        {{-- BUILDING LIST --}}
+        <div class="col-span-3">
+            <x-card
+                title="Gedung Terdaftar"
+                subtitle="Jumlah node per gedung"
+                shadow
+                class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl h-full"
+            >
+                @forelse($this->buildings as $b)
+                <div class="flex items-center gap-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                    <div class="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                        <x-icon name="o-building-office" class="w-5 h-5 text-zinc-500" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200 truncate">{{ $b['name'] }}</p>
+                        <p class="text-xs text-zinc-400">{{ $b['rooms'] }} ruangan</p>
+                    </div>
+                    <div class="flex items-center gap-3 text-xs shrink-0">
+                        <span class="flex items-center gap-1 text-green-500 font-semibold">
+                            <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                            {{ $b['active'] }}
+                        </span>
+                        <span class="flex items-center gap-1 text-red-500 font-semibold">
+                            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                            {{ $b['inactive'] }}
+                        </span>
+                        <span class="text-zinc-400">/ {{ $b['total'] }} node</span>
+                    </div>
+                </div>
+                @empty
+                <div class="py-10 text-center text-zinc-400">
+                    <x-icon name="o-building-office" class="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p class="text-sm">Belum ada gedung terdaftar.</p>
+                </div>
+                @endforelse
+            </x-card>
+        </div>
+
+        {{-- RECENT NODES --}}
+        <div class="col-span-2">
+            <x-card
+                title="Node Terbaru"
+                subtitle="5 node yang baru didaftarkan"
+                shadow
+                class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl h-full"
+            >
+                @forelse($this->recentNodes as $node)
+                <div class="flex items-start gap-3 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                    <div class="mt-1 w-2 h-2 rounded-full shrink-0 {{ $node->status ? 'bg-green-500' : 'bg-zinc-500' }}"></div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{{ $node->name }}</p>
+                        <p class="text-[11px] text-zinc-400 truncate">
+                            {{ $node->room?->building?->name }} › {{ $node->room?->name }}
+                        </p>
+                        <x-badge value="{{ $node->node_type }}" class="badge-ghost badge-sm mt-1 capitalize" />
+                    </div>
+                    <p class="text-[10px] text-zinc-500 shrink-0 mt-0.5">{{ $node->created_at->diffForHumans() }}</p>
+                </div>
+                @empty
+                <div class="py-10 text-center text-zinc-400">
+                    <x-icon name="o-server-stack" class="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p class="text-sm">Belum ada node.</p>
+                </div>
+                @endforelse
+            </x-card>
+        </div>
+
+    </div>
+</div>

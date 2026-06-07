@@ -18,7 +18,6 @@ new class extends Component
     #[On('enableEditClient')]
     public function enableEditClient($clientId = null)
     {
-        // Jika modal mau dibuka (clientId tidak null)
         if ($clientId) {
             $this->clientId = $clientId;
             $client = Client::find($clientId);
@@ -27,7 +26,7 @@ new class extends Component
                 $this->code = $client->code;
                 $this->name = $client->name;
                 $this->expirity = $client->expirity;
-                $this->clientEditModal = false;
+                $this->clientEditModal = true;
             }
         } else {
             // Jika tombol cancel ditekan

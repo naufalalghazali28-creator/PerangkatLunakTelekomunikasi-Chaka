@@ -176,7 +176,7 @@ new class extends Component
     <x-header title="Admin | Client Management" separator progress-indicator>
         <x-slot:actions>
             {{-- Tombol PDF, Excel, dan Add Client sejajar di pojok kanan atas --}}
-            <x-button label="Import" icon="o-arrow-up-tray" wire:click="$set('importModal', false)" class="btn-outline btn-info btn-sm" />
+            <x-button label="Import" icon="o-arrow-up-tray" wire:click="$set('importModal', true)" class="btn-outline btn-info btn-sm" />
             <x-dropdown label="Export" icon="o-arrow-down-tray" class="btn-outline btn-sm" right>
                 <x-menu-item title="Export PDF" icon="o-document-text" wire:click="exportPdf" class="text-error" />
                 <x-menu-item title="Export Excel" icon="o-table-cells" wire:click="exportExcel" class="text-success" />

@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Mary\Traits\Toast;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Livewire\Attributes\Computed;
 
 new class extends Component {
     use Toast;
@@ -22,6 +23,15 @@ new class extends Component {
         ['key' => 'role', 'label' => 'Role', 'class' => 'capitalize'],
         ['key' => 'client_name', 'label' => 'Client Pemilik'],
     ];
+
+    #[Computed]
+    public function operators() {
+        return User::where('role', 'operator')
+            ->where(function($query) {
+                $query->where('email', 'like', '%@staff.id')
+                      ->orWhere('email', 'like', '%@bems.id');
+            })->get();
+    }
 
     public function saveOperator() {
         $this->validate([
@@ -40,7 +50,7 @@ new class extends Component {
         User::create([
             'name' => $this->staffName,
             'email' => $generatedEmail,
-            'password' => Hash::make('password123'), // Password default internal
+            'password' => Hash::make('password123'), 
             'role' => 'operator', 
         ]);
 
@@ -145,11 +155,7 @@ new class extends Component {
                 {{-- Gunakan WHERE LIKE agar tidak masalah huruf besar/kecil --}}
                 <x-table 
                     :headers="$this->headers" 
-                    :rows="\App\Models\User::where('role', 'operator')
-                    ->where(function($query) {
-                        $query->where('email', 'like', '%@staff.id')
-                            ->orWhere('email', 'like', '%@bems.id'); // Tambahan jika ada email admin/client
-                    })->get()">
+                    :rows="$this->operators">
                     @scope('cell_client_name', $user)
                         @if($user->parent_id)
                             {{ \App\Models\BEMS\Client::where('user_id', $user->parent_id)->value('name') ?? 'Tidak diketahui' }}

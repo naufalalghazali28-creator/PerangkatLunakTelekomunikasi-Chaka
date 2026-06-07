@@ -34,14 +34,24 @@ new #[Layout('layouts.guest')] class extends Component
             // Jika berhasil, regenerasi session untuk keamanan.
             session()->regenerate();
 
-            // Cek jika pengguna memiliki role 'admin'.
-            if (Auth::user()->hasRole('admin')) {
-                // Redirect ke route 'admin' jika role adalah admin.
-                return redirect()->route('admin');
+            $user = Auth::user();
+            $role = strtolower(trim($user->role ?? ''));
+
+            // Arahkan ke dashboard spesifik berdasarkan role masing-masing
+            if ($role === 'admin' || (method_exists($user, 'hasRole') && $user->hasRole('admin'))) {
+                return redirect()->to('/admin');
+            } elseif ($role === 'maintenance') {
+                return redirect()->to('/maintenance');
+            } elseif ($role === 'operator') {
+                return redirect()->to('/operator');
+            } elseif ($role === 'viewer') {
+                return redirect()->to('/viewer');
+            } elseif ($role === 'client') {
+                return redirect()->to('/client');
             }
 
-            // Redirect ke halaman yang dituju sebelumnya atau ke '/dashboard'.
-            return redirect()->intended('/dashboard');
+            // Redirect fallback jika role tidak dikenali
+            return redirect()->intended('/');
         }
 
         // Jika autentikasi gagal, tampilkan pesan error menggunakan toast.
