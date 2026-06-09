@@ -15,6 +15,9 @@ new class extends Component
 {
     use WithPagination, Toast;
 
+    public string $buildingFilter = '';
+    public string $sensorFilter = '';  
+
     public string $search = '';
 
     public bool $editModal = false;
@@ -34,7 +37,20 @@ new class extends Component
         ['key' => 'action',                'label' => 'Aksi'],
     ];
 
-    public function updatedSearch() { $this->resetPage(); }
+    public function updatedSearch()
+    {
+        $this->resetPage();
+    }
+
+    public function updatedBuildingFilter()
+    {
+        $this->resetPage();
+    }
+
+    public function updatedSensorFilter()
+    {
+        $this->resetPage();
+    }
 
     // ── Computed ─────────────────────────────────────────
     #[Computed]
@@ -46,6 +62,17 @@ new class extends Component
             'total'    => $total,
             'active'   => $active,
             'inactive' => $total - $active,
+        ];
+    }
+
+    #[Computed]
+    public function dashboardSummary()
+    {
+        return [
+            'buildings' => Building::count(),
+            'rooms'     => Room::count(),
+            'active'    => Node::where('status', true)->count(),
+            'inactive'  => Node::where('status', false)->count(),
         ];
     }
 
@@ -72,6 +99,14 @@ new class extends Component
                     'inactive' => $nodes->where('status', false)->count(),
                 ];
             })->values();
+    }
+
+    #[Computed]
+    public function buildingOptions()
+    {
+        return Building::orderBy('name')
+            ->pluck('name', 'id')
+            ->toArray();
     }
 
     // Data line chart: nilai dummy per tipe sensor
@@ -198,42 +233,102 @@ new class extends Component
             'Data_Gedung_' . now()->format('d-m-Y') . '.xlsx'
         );
     }
-
+   
     public function exportPdf($chartImg1 = null, $chartImg2 = null, $chartImg3 = null)
-    {
-        $rooms = Room::with(['building.client'])
+    { 
+        \Log::info('EXPORT PDF DIPANGGIL');
+        $rooms   = Room::with(['building.client'])
             ->withCount(['nodes', 'nodes as active_nodes_count' => fn($q) => $q->where('status', true)])
             ->when($this->search, fn($q) =>
                 $q->where('name', 'like', "%{$this->search}%")
                   ->orWhereHas('building', fn($b) => $b->where('name', 'like', "%{$this->search}%"))
             )->latest()->get();
 
-        $pdf = Pdf::loadView('exports.gedung-pdf', [
-            'rooms'     => $rooms,
-            'printedAt' => now()->format('d/m/Y H:i'),
-            'summary'   => $this->nodeSummary,
-            'chartImg1' => $chartImg1,
-            'chartImg2' => $chartImg2,
-            'chartImg3' => $chartImg3,
-        ])->setPaper('a4', 'landscape');
+        $summary = $this->nodeSummary;
 
+        $html  = '<style>';
+        $html .= 'body{font-family:sans-serif;font-size:10px;color:#333}';
+        $html .= 'h2{text-align:center;font-size:13px;margin-bottom:2px}';
+        $html .= 'p.sub{text-align:center;color:#888;margin:0 0 10px;font-size:9px}';
+        $html .= '.stats{display:flex;gap:16px;margin-bottom:12px}';
+        $html .= '.stat{flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;text-align:center}';
+        $html .= '.val{font-size:18px;font-weight:bold}.lbl{font-size:8px;color:#6b7280}';
+        $html .= '.charts{text-align:center;margin-bottom:10px}';
+        $html .= '.charts img{width:30%;display:inline-block;margin:0 1%}';
+        $html .= 'table{width:100%;border-collapse:collapse}';
+        $html .= 'th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}';
+        $html .= 'th{background:#16a34a;color:#fff;font-size:9px;text-transform:uppercase}';
+        $html .= 'tr:nth-child(even){background:#f9fafb}';
+        $html .= '.blue{color:#2563eb;font-weight:bold}';
+        $html .= '</style>';
+        $html .= '<h2>LAPORAN MANAJEMEN GEDUNG & SENSOR</h2>';
+        $html .= '<p class="sub">Tanggal Cetak: ' . now()->format('d/m/Y H:i') . '</p>';
+        $html .= '<div class="stats">';
+        $html .= '<div class="stat"><div class="val">' . $summary['total'] . '</div><div class="lbl">Total Node</div></div>';
+        $html .= '<div class="stat"><div class="val" style="color:#2563eb">' . $summary['active'] . '</div><div class="lbl">Node Aktif</div></div>';
+        $html .= '<div class="stat"><div class="val" style="color:#6b7280">' . $summary['inactive'] . '</div><div class="lbl">Node Nonaktif</div></div>';
+        $html .= '<div class="stat"><div class="val">' . $rooms->count() . '</div><div class="lbl">Total Ruangan</div></div>';
+        $html .= '</div>';
+
+        if ($chartImg1 || $chartImg2 || $chartImg3) {
+            $html .= '<div class="charts">';
+            if ($chartImg1) $html .= '<img src="' . $chartImg1 . '">';
+            if ($chartImg2) $html .= '<img src="' . $chartImg2 . '">';
+            if ($chartImg3) $html .= '<img src="' . $chartImg3 . '">';
+            $html .= '</div>';
+        }
+
+        $html .= '<table><thead><tr>';
+        $html .= '<th>No</th><th>Gedung</th><th>Lantai</th><th>Ruangan</th><th>Client</th><th>Total Node</th><th>Node Aktif</th>';
+        $html .= '</tr></thead><tbody>';
+        foreach ($rooms as $i => $room) {
+            $html .= '<tr>';
+            $html .= '<td>' . ($i+1) . '</td>';
+            $html .= '<td>' . e($room->building->name ?? '-') . '</td>';
+            $html .= '<td>' . $room->floor . '</td>';
+            $html .= '<td>' . e($room->name) . '</td>';
+            $html .= '<td>' . e($room->building->client->name ?? '-') . '</td>';
+            $html .= '<td>' . $room->nodes_count . '</td>';
+            $html .= '<td class="blue">' . $room->active_nodes_count . '</td>';
+            $html .= '</tr>';
+        }
+        $html .= '</tbody></table>';
+
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
         $this->dispatch('open-pdf', pdfBase64: base64_encode($pdf->output()));
     }
 
-    public function render()
+    #[Computed]
+    public function rooms()
     {
-        $rooms = Room::with(['building.client'])
-            ->withCount(['nodes', 'nodes as active_nodes_count' => fn($q) => $q->where('status', true)])
+        return Room::with(['building.client'])
+            ->withCount([
+                'nodes',
+                'nodes as active_nodes_count' => fn($q) => $q->where('status', true)
+            ])
+
             ->when($this->search, function ($q) {
                 $q->where('name', 'like', "%{$this->search}%")
-                  ->orWhereHas('building', fn($b) =>
-                      $b->where('name', 'like', "%{$this->search}%")
-                        ->orWhereHas('client', fn($c) => $c->where('name', 'like', "%{$this->search}%"))
-                  );
+                    ->orWhereHas('building', fn($b) =>
+                        $b->where('name', 'like', "%{$this->search}%")
+                        ->orWhereHas('client', fn($c) =>
+                            $c->where('name', 'like', "%{$this->search}%")
+                        )
+                    );
             })
-            ->latest()->paginate(15);
 
-        return view($this->view ?? 'livewire.placeholder', ['rooms' => $rooms]);
+            ->when($this->buildingFilter, function ($q) {
+                $q->where('building_id', $this->buildingFilter);
+            })
+
+            ->when($this->sensorFilter, function ($q) {
+                $q->whereHas('nodes', function ($n) {
+                    $n->where('node_type', $this->sensorFilter);
+                });
+            })
+
+            ->latest()
+            ->paginate(15);
     }
 }; ?>
 
@@ -345,44 +440,86 @@ new class extends Component
     </x-header>
 
     {{-- NODE SUMMARY CARDS --}}
-    <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        {{-- TOTAL GEDUNG --}}
         <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-                    <x-icon name="o-server-stack" class="w-6 h-6 text-zinc-500" />
+                <div class="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                    <x-icon name="o-building-office-2" class="w-6 h-6 text-indigo-500"/>
                 </div>
                 <div>
-                    <p class="text-2xl font-bold text-zinc-900 dark:text-white">{{ $this->nodeSummary['total'] }}</p>
-                    <p class="text-xs text-zinc-500">Total Node</p>
+                    <p class="text-3xl font-bold">
+                        {{ $this->dashboardSummary['buildings'] }}
+                    </p>
+
+                    <p class="text-sm text-zinc-500">
+                        Total Gedung
+                    </p>
                 </div>
             </div>
         </x-card>
+
+        {{-- TOTAL RUANGAN --}}
         <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center shrink-0">
-                    <x-icon name="o-bolt" class="w-6 h-6 text-blue-500" />
+                <div class="w-12 h-12 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+                    <x-icon name="o-home-modern" class="w-6 h-6 text-cyan-500"/>
                 </div>
+
                 <div>
-                    <p class="text-2xl font-bold text-blue-500">{{ $this->nodeSummary['active'] }}</p>
-                    <p class="text-xs text-zinc-500">Node Aktif</p>
+                    <p class="text-3xl font-bold">
+                        {{ $this->dashboardSummary['rooms'] }}
+                    </p>
+
+                    <p class="text-sm text-zinc-500">
+                        Total Ruangan
+                    </p>
                 </div>
             </div>
         </x-card>
+
+        {{-- NODE AKTIF --}}
         <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-                    <x-icon name="o-pause-circle" class="w-6 h-6 text-zinc-400" />
+                <div class="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                    <x-icon name="o-bolt" class="w-6 h-6 text-blue-500"/>
                 </div>
+
                 <div>
-                    <p class="text-2xl font-bold text-zinc-500">{{ $this->nodeSummary['inactive'] }}</p>
-                    <p class="text-xs text-zinc-500">Node Nonaktif</p>
+                    <p class="text-3xl font-bold text-blue-500">
+                        {{ $this->dashboardSummary['active'] }}
+                    </p>
+
+                    <p class="text-sm text-zinc-500">
+                        Node Aktif
+                    </p>
                 </div>
             </div>
         </x-card>
+
+        {{-- NODE NONAKTIF --}}
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-zinc-500/10 flex items-center justify-center">
+                    <x-icon name="o-pause-circle" class="w-6 h-6 text-zinc-500"/>
+                </div>
+
+                <div>
+                    <p class="text-3xl font-bold text-zinc-500">
+                        {{ $this->dashboardSummary['inactive'] }}
+                    </p>
+
+                    <p class="text-sm text-zinc-500">
+                        Node Nonaktif
+                    </p>
+                </div>
+            </div>
+        </x-card>
+
     </div>
 
     {{-- CHARTS ROW 1 --}}
-    <div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
         <x-card title="Tipe Sensor Terdaftar" shadow
             class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
             <div class="flex justify-center py-2" style="min-height:220px">
@@ -414,18 +551,84 @@ new class extends Component
     @endif
 
     {{-- TABLE --}}
-    <x-card shadow class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
-        <div class="mb-4 flex gap-3">
-            <x-input icon="o-magnifying-glass" wire:model.live.debounce.500ms="search"
-                placeholder="Cari gedung, ruangan, atau client..."
-                class="flex-1" clearable />
+    <x-card
+        title="Daftar Gedung dan Ruangan"
+        subtitle="Informasi gedung, ruangan, client, dan status node"
+        shadow
+        class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl"
+    >
+        <div class="mb-4 flex flex-col md:flex-row gap-3">
+            <x-input
+            icon="o-magnifying-glass"
+            wire:model.live.debounce.500ms="search"
+            placeholder="Cari gedung, ruangan, atau client..."
+            class="flex-1"
+            clearable
+        />
+
+        <x-select
+            wire:model.live="buildingFilter"
+            placeholder="Semua Gedung"
+            class="w-full md:w-56"
+            :options="collect($this->buildingOptions)
+                ->map(fn($name, $id) => [
+                    'id' => $id,
+                    'name' => $name
+                ])
+                ->values()
+                ->toArray()"
+        />
+
+        <x-select
+            wire:model.live="sensorFilter"
+            placeholder="Semua Sensor"
+            class="w-full md:w-52"
+            :options="[
+                ['id' => 'temperature', 'name' => 'Suhu'],
+                ['id' => 'current', 'name' => 'Arus'],
+                ['id' => 'voltage', 'name' => 'Tegangan'],
+                ['id' => 'light', 'name' => 'Cahaya'],
+            ]"
+        />
+
+        <x-dropdown
+            label="Export"
+            icon="o-arrow-down-tray"
+            class="btn-outline"
+            right
+        >
+
+            <x-menu-item
+                title="Export PDF"
+                icon="o-document-text"
+                @click="
+                    const imgs = [...document.querySelectorAll('canvas')]
+                        .map(c => c.toDataURL('image/png'));
+
+                    $wire.exportPdf(
+                        imgs[0] ?? null,
+                        imgs[1] ?? null,
+                        imgs[2] ?? null
+                    );
+                "
+                class="text-error"
+            />
+
+            <x-menu-item
+                title="Export Excel"
+                icon="o-table-cells"
+                wire:click="exportExcel"
+                class="text-success"
+            />
+
+        </x-dropdown>
         </div>
 
         <div wire:loading wire:target="exportPdf,exportExcel" class="mb-3">
             <x-alert title="Generating File..." icon="o-arrow-path" class="alert-info" />
         </div>
 
-        <x-table :headers="$headers" :rows="$rooms" with-pagination
+        <x-table :headers="$headers" :rows="$this->rooms" with-pagination
             class="
                 [&_thead]:bg-zinc-50 [&_thead]:dark:bg-zinc-800
                 [&_th]:text-zinc-500 [&_th]:text-xs [&_th]:uppercase
@@ -468,14 +671,26 @@ new class extends Component
     </x-modal>
 
     <script>
-    document.addEventListener('livewire:initialized', () => {
-        Livewire.on('open-pdf', (event) => {
-            const base64 = event[0]?.pdfBase64 || event.pdfBase64;
-            if (!base64) return;
-            const arr = new Uint8Array([...atob(base64)].map(c => c.charCodeAt(0)));
-            const url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
-            const win = window.open(url, '_blank');
-            if (!win) alert('Izinkan popup untuk melihat PDF.');
+    document.addEventListener('livewire:init', () => {
+        Livewire.on('open-pdf', (data) => {
+            console.log(data);
+            const base64 = data.pdfBase64 ?? data[0]?.pdfBase64;
+            if (!base64) {
+                console.error('PDF Base64 kosong');
+                return;
+            }
+            const binary = atob(base64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob(
+                [bytes],
+                { type: 'application/pdf' }
+            );
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
         });
     });
     </script>

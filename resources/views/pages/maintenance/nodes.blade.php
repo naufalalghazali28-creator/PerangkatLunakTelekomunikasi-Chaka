@@ -165,9 +165,9 @@ new class extends Component {
         );
     }
 
-    public function exportPdf(): mixed
+    public function exportPdf(): void
     {
-        $nodes = Node::with('room.building')
+        $nodes = Node::with(['room.building', 'creator'])
             ->when($this->search, fn($q) =>
                 $q->where('name', 'like', "%{$this->search}%")
             )
@@ -177,13 +177,45 @@ new class extends Component {
             )
             ->latest()->get();
 
-        $pdf = Pdf::loadView('exports.nodes-pdf', [
-            'nodes'     => $nodes,
-            'printedAt' => now()->format('d/m/Y H:i'),
-        ])->setPaper('a4', 'landscape');
+        $tipeMap = ['temperature'=>'Suhu','current'=>'Arus','voltage'=>'Tegangan','light'=>'Cahaya'];
 
-        $b64 = base64_encode($pdf->output());
-        $this->dispatch('open-pdf', pdfBase64: $b64);
+        $html  = '<style>';
+        $html .= 'body{font-family:sans-serif;font-size:10px}';
+        $html .= 'h2{text-align:center;font-size:13px;margin-bottom:2px}';
+        $html .= 'p.sub{text-align:center;color:#888;margin:0 0 12px;font-size:9px}';
+        $html .= 'table{width:100%;border-collapse:collapse}';
+        $html .= 'th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}';
+        $html .= 'th{background:#16a34a;color:#fff;font-size:9px;text-transform:uppercase}';
+        $html .= 'tr:nth-child(even){background:#f9fafb}';
+        $html .= '.aktif{color:#16a34a;font-weight:bold}.nonaktif{color:#6b7280}';
+        $html .= '.mono{font-family:monospace;font-size:8px;color:#059669}';
+        $html .= '</style>';
+        $html .= '<h2>LAPORAN NODE INVENTORY</h2>';
+        $html .= '<p class="sub">Tanggal Cetak: ' . now()->format('d/m/Y H:i') . ' &nbsp;|&nbsp; Total: ' . $nodes->count() . ' node</p>';
+        $html .= '<table><thead><tr>';
+        $html .= '<th>No</th><th>Nama Node</th><th>Tipe</th><th>Gedung</th><th>Ruangan</th>';
+        $html .= '<th>Pendaftar</th><th>MQTT Topic</th><th>Broker</th><th>Status</th><th>Didaftarkan</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($nodes as $i => $node) {
+            $status = $node->status ? '<span class="aktif">Aktif</span>' : '<span class="nonaktif">Nonaktif</span>';
+            $html .= '<tr>';
+            $html .= '<td>' . ($i+1) . '</td>';
+            $html .= '<td>' . e($node->name) . '</td>';
+            $html .= '<td>' . ($tipeMap[$node->node_type] ?? $node->node_type) . '</td>';
+            $html .= '<td>' . e($node->room?->building?->name ?? '-') . '</td>';
+            $html .= '<td>' . e($node->room?->name ?? '-') . '</td>';
+            $html .= '<td>' . e($node->creator?->name ?? '-') . '</td>';
+            $html .= '<td class="mono">' . e($node->mqtt_topic) . '</td>';
+            $html .= '<td class="mono">' . e(($node->config['broker'] ?? '-') . ':' . ($node->config['port'] ?? 1883)) . '</td>';
+            $html .= '<td>' . $status . '</td>';
+            $html .= '<td>' . $node->created_at->format('d/m/Y') . '</td>';
+            $html .= '</tr>';
+        }
+        $html .= '</tbody></table>';
+
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+        $this->dispatch('open-pdf', pdfBase64: base64_encode($pdf->output()));
     }
 
     public function downloadTemplate(): mixed

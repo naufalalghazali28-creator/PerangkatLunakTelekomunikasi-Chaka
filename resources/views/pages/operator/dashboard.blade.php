@@ -12,6 +12,8 @@ new class extends Component {
 
     public array $liveData = [];
 
+    public string $selectedSensorType = 'temperature';
+
     public function mount(): void
     {
         $mqtt = new MqttService();
@@ -88,25 +90,160 @@ new class extends Component {
     #[Computed]
     public function sensorChartData()
     {
-        $rows = [];
-        foreach ($this->activeNodes as $node) {
-            $d = $this->liveData[$node->id] ?? null;
-            if (!$d) continue;
-            $label = substr($node->name, 0, 14) . (strlen($node->name) > 14 ? '…' : '');
-            $value = match($node->node_type) {
-                'temperature' => $d['suhu']     ?? 0,
-                'current'     => $d['arus']     ?? 0,
-                'voltage'     => $d['tegangan'] ?? 0,
-                'light'       => $d['cahaya']   ?? 0,
-                default       => 0,
-            };
-            $rows[] = [
-                'label' => $label,
-                'type'  => $node->node_type,
-                'value' => $value,
+        $activeNodes = Node::where('status', true)->get();
+
+        if ($activeNodes->isEmpty()) {
+            return [];
+        }
+
+        $labels = collect(range(6, 0))
+            ->map(fn($i) => now()->subMinutes($i * 10)->format('H:i'))
+            ->toArray();
+
+        $datasets = [];
+
+        $types = [
+            'temperature' => [
+                'label' => 'Suhu (°C)',
+                'color' => '#3b82f6',
+            ],
+            'current' => [
+                'label' => 'Arus (A)',
+                'color' => '#f59e0b',
+            ],
+            'voltage' => [
+                'label' => 'Tegangan (V)',
+                'color' => '#ef4444',
+            ],
+            'light' => [
+                'label' => 'Cahaya (lux)',
+                'color' => '#22c55e',
+            ],
+        ];
+
+        foreach ($types as $type => $meta) {
+
+            $count = $activeNodes
+                ->where('node_type', $type)
+                ->count();
+
+            if ($count === 0) {
+                continue;
+            }
+
+            $data = [];
+
+            for ($i = 0; $i < 7; $i++) {
+
+                $sum = 0;
+
+                foreach (
+                    $activeNodes->where('node_type', $type)
+                    as $node
+                ) {
+
+                    $payload = app(MqttService::class)
+                        ->generateDummyPayload($type);
+
+                    $sum += match ($type) {
+                        'temperature' => $payload['suhu'],
+                        'current' => $payload['arus'],
+                        'voltage' => $payload['tegangan'],
+                        'light' => $payload['cahaya'],
+                        default => 0,
+                    };
+                }
+
+                $data[] = round($sum / max($count,1),2);
+            }
+
+            $datasets[] = [
+                'label' =>
+                    $meta['label']
+                    .' ['.$count.' sensor]',
+
+                'data' => $data,
+
+                'borderColor' => $meta['color'],
+                'backgroundColor' => $meta['color'].'20',
+
+                'fill' => true,
+                'tension' => 0.4,
+                'pointRadius' => 4,
             ];
         }
-        return $rows;
+
+        return [
+            'labels' => $labels,
+            'datasets' => $datasets,
+        ];
+    }
+
+    #[Computed]
+    public function sensorDetailChartData()
+    {
+        $nodes = Node::with('room.building')
+            ->where('status', true)
+            ->where('node_type', $this->selectedSensorType)
+            ->get();
+
+        if ($nodes->isEmpty()) {
+            return [];
+        }
+
+        $labels = collect(range(6, 0))
+            ->map(fn($i) => now()->subMinutes($i * 10)->format('H:i'))
+            ->toArray();
+
+        $datasets = [];
+
+        foreach ($nodes as $node) {
+
+            $color = sprintf(
+                '#%06X',
+                mt_rand(0, 0xFFFFFF)
+            );
+
+            $data = [];
+
+            for ($i = 0; $i < 7; $i++) {
+
+                $payload = app(MqttService::class)
+                    ->generateDummyPayload($node->node_type);
+
+                $value = match ($node->node_type) {
+                    'temperature' => $payload['suhu'] ?? 0,
+                    'current'     => $payload['arus'] ?? 0,
+                    'voltage'     => $payload['tegangan'] ?? 0,
+                    'light'       => $payload['cahaya'] ?? 0,
+                    default       => 0,
+                };
+
+                $data[] = $value;
+            }
+
+            $datasets[] = [
+                'label' => $node->name,
+                'location' =>
+                    ($node->room?->building?->name ?? '-') .
+                    ' • ' .
+                    ($node->room?->name ?? '-'),
+
+                'data' => $data,
+
+                'borderColor' => $color,
+                'backgroundColor' => $color.'20',
+
+                'fill' => false,
+                'tension' => 0.4,
+                'pointRadius' => 4,
+            ];
+        }
+
+        return [
+            'labels' => $labels,
+            'datasets' => $datasets,
+        ];
     }
 }; ?>
 
@@ -119,6 +256,7 @@ new class extends Component {
                 this.buildTypeChart();
                 this.buildBuildingChart();
                 this.buildSensorChart();
+                this.buildSensorDetailChart();
             });
         },
         destroyAll() {
@@ -187,36 +325,46 @@ new class extends Component {
             const rows = {{ Js::from($this->sensorChartData) }};
             if (!rows.length) return;
 
-            const colors = { temperature: '#3b82f6', current: '#f59e0b', voltage: '#ef4444', light: '#22c55e' };
+            // Stacked Bar: setiap tipe sensor jadi satu layer (dataset)
+            const types   = ['temperature', 'current', 'voltage', 'light'];
+            const labels  = { temperature: 'Suhu (°C)', current: 'Arus (A)', voltage: 'Tegangan (V)', light: 'Cahaya (lux)' };
+            const colors  = { temperature: '#3b82f6', current: '#f59e0b', voltage: '#ef4444', light: '#22c55e' };
             const unitMap = { temperature: '°C', current: 'A', voltage: 'V', light: 'lux' };
+
+            // Buat satu dataset per tipe — nilai null jika node bukan tipe itu
+            const nodeLabels = rows.map(r => r.label);
+            const datasets   = types
+                .filter(t => rows.some(r => r.type === t))
+                .map(t => ({
+                    label: labels[t],
+                    data: rows.map(r => r.type === t ? r.value : 0),
+                    backgroundColor: colors[t] + 'cc',
+                    borderColor: colors[t],
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    stack: 'sensor',
+                }));
 
             this.charts.sensor = new Chart(el, {
                 type: 'bar',
-                data: {
-                    labels: rows.map(r => r.label),
-                    datasets: [{
-                        label: 'Nilai Sensor',
-                        data: rows.map(r => r.value),
-                        backgroundColor: rows.map(r => colors[r.type] ?? '#6366f1'),
-                        borderRadius: 6,
-                    }]
-                },
+                data: { labels: nodeLabels, datasets },
                 options: {
                     responsive: true,
                     plugins: {
-                        legend: { display: false },
+                        legend: { labels: { color: this.labelColor(), font: { size: 11 } } },
                         tooltip: {
                             callbacks: {
                                 label: (ctx) => {
-                                    const row = rows[ctx.dataIndex];
-                                    return ` ${ctx.parsed.y} ${unitMap[row.type] ?? ''}`;
+                                    if (ctx.parsed.y === 0) return null;
+                                    const t = types.find(t => labels[t] === ctx.dataset.label);
+                                    return ` ${ctx.dataset.label}: ${ctx.parsed.y} ${unitMap[t] ?? ''}`;
                                 }
                             }
                         }
                     },
                     scales: {
-                        x: { ticks: { color: this.labelColor() }, grid: { display: false } },
-                        y: { ticks: { color: this.labelColor() }, grid: { color: this.gridColor() }, beginAtZero: true }
+                        x: { stacked: true, ticks: { color: this.labelColor() }, grid: { display: false } },
+                        y: { stacked: true, ticks: { color: this.labelColor() }, grid: { color: this.gridColor() }, beginAtZero: true }
                     }
                 }
             });
@@ -238,40 +386,42 @@ new class extends Component {
     </x-header>
 
     {{-- STAT CARDS --}}
-    <div class="grid grid-cols-3 gap-4 mb-6">
-        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                <div class="w-12 h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
                     <x-icon name="o-server-stack" class="w-6 h-6 text-zinc-500" />
                 </div>
                 <div>
-                    <p class="text-2xl font-bold text-zinc-900 dark:text-white">{{ $this->summary['total'] }}</p>
-                    <p class="text-xs text-zinc-500">Total Node</p>
+                    <p class="text-3xl font-bold">{{ $this->summary['total'] }}</p>
+                    <p class="text-sm text-zinc-500">Total Node</p>
                 </div>
             </div>
         </x-card>
-        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center shrink-0">
+                <div class="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0">
                     <x-icon name="o-bolt" class="w-6 h-6 text-blue-500" />
                 </div>
                 <div>
-                    <p class="text-2xl font-bold text-blue-500">{{ $this->summary['active'] }}</p>
-                    <p class="text-xs text-zinc-500">Node Aktif</p>
+                    <p class="text-3xl font-bold text-blue-500">{{ $this->summary['active'] }}</p>
+                    <p class="text-sm text-zinc-500">Node Aktif</p>
                 </div>
             </div>
         </x-card>
-        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+
+        <x-card class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                <div class="w-12 h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
                     <x-icon name="o-pause-circle" class="w-6 h-6 text-zinc-400" />
                 </div>
                 <div>
-                    <p class="text-2xl font-bold text-zinc-500">{{ $this->summary['inactive'] }}</p>
-                    <p class="text-xs text-zinc-500">Node Nonaktif</p>
+                    <p class="text-3xl font-bold text-zinc-500">{{ $this->summary['inactive'] }}</p>
+                    <p class="text-sm text-zinc-500">Node Nonaktif</p>
                 </div>
             </div>
         </x-card>
+
     </div>
 
     {{-- ROW 1: Donut + Bar Gedung --}}
@@ -303,6 +453,42 @@ new class extends Component {
             <a href="/operator/control" class="text-xs text-blue-400 mt-1 inline-block">Buka Sensor Control →</a>
         </div>
         @endif
+    </x-card>
+
+    <x-card
+        title="Detail Sensor"
+        subtitle="Monitoring per sensor"
+        shadow
+        class="mb-4"
+    >
+
+        <div class="mb-4">
+
+            <select
+                wire:model.live="selectedSensorType"
+                class="select select-bordered"
+            >
+                <option value="temperature">
+                    Sensor Suhu
+                </option>
+
+                <option value="current">
+                    Sensor Arus
+                </option>
+
+                <option value="voltage">
+                    Sensor Tegangan
+                </option>
+
+                <option value="light">
+                    Sensor Cahaya
+                </option>
+            </select>
+
+        </div>
+
+        <canvas id="chartSensorDetail"></canvas>
+
     </x-card>
 
     {{-- ROW 3: Tabel Gedung + Node Aktif --}}
