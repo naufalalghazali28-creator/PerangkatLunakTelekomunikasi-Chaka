@@ -11,6 +11,7 @@ use Livewire\Attributes\Computed;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Mary\Traits\Toast;
+use Illuminate\Support\Facades\Auth;
 
 new class extends Component {
     use Toast, WithPagination, WithFileUploads;
@@ -86,7 +87,15 @@ new class extends Component {
     {
         $node      = Node::findOrFail($id);
         $newStatus = !$node->status;
-        $node->update(['status' => $newStatus]);
+        $node->update([
+            'status' => $newStatus,
+        ]);
+
+        if ($newStatus) {
+            $node->update([
+                'activated_by' => Auth::id(),
+            ]);
+        }
 
         if ($newStatus) {
             $mqtt    = new MqttService();

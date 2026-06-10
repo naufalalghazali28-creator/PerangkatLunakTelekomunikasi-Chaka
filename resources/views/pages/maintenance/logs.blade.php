@@ -62,7 +62,6 @@ new class extends Component {
         ['id' => 'light',       'name' => 'Cahaya'],
     ];
 
-    // ── EXPORT ──────────────────────────────────────────
     public function exportExcel(): mixed
     {
         return Excel::download(
@@ -71,57 +70,94 @@ new class extends Component {
         );
     }
 
-    public function exportPdf(): void
+    public function exportPdf()
     {
-        $nodes = Node::with('room.building')
-            ->when($this->search,         fn($q) => $q->where('name', 'like', "%{$this->search}%"))
-            ->when($this->filterType,     fn($q) => $q->where('node_type', $this->filterType))
-            ->when($this->filterBuilding, fn($q) =>
-                $q->whereHas('room', fn($r) => $r->where('building_id', $this->filterBuilding))
+        $nodes = Node::with(['room.building', 'creator'])
+            ->when($this->search, fn($q) =>
+                $q->where('name', 'like', "%{$this->search}%")
             )
-            ->when($this->filterDate, fn($q) => $q->whereDate('created_at', $this->filterDate))
-            ->latest()->get();
+            ->when($this->filterType,
+                fn($q) => $q->where('node_type', $this->filterType)
+            )
+            ->when($this->filterBuilding, fn($q) =>
+                $q->whereHas('room', fn($r) =>
+                    $r->where('building_id', $this->filterBuilding)
+                )
+            )
+            ->when($this->filterDate, fn($q) =>
+                $q->whereDate('created_at', $this->filterDate)
+            )
+            ->latest()
+            ->get();
 
-        // Tambah eager load creator jika belum
-        $typeMap = ['temperature' => 'Suhu', 'current' => 'Arus', 'voltage' => 'Tegangan', 'light' => 'Cahaya'];
+        $typeMap = [
+            'temperature' => 'Suhu',
+            'current'     => 'Arus',
+            'voltage'     => 'Tegangan',
+            'light'       => 'Cahaya',
+        ];
 
-        $html  = '<style>';
-        $html .= 'body{font-family:sans-serif;font-size:10px;color:#333}';
-        $html .= 'h2{text-align:center;font-size:13px;margin-bottom:2px}';
-        $html .= 'p.sub{text-align:center;color:#888;margin:0 0 12px;font-size:9px}';
-        $html .= 'table{width:100%;border-collapse:collapse}';
-        $html .= 'th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}';
-        $html .= 'th{background:#16a34a;color:#fff;font-size:9px;text-transform:uppercase}';
-        $html .= 'tr:nth-child(even){background:#f9fafb}';
-        $html .= '.mono{font-family:monospace;font-size:8px;color:#059669}';
-        $html .= '.aktif{color:#16a34a;font-weight:bold}.naktif{color:#6b7280}';
-        $html .= '</style>';
-        $html .= '<h2>LOG INSTALASI NODE</h2>';
-        $html .= '<p class="sub">Tanggal Cetak: ' . now()->format('d/m/Y H:i') . ' | Total: ' . $nodes->count() . ' node</p>';
-        $html .= '<table><thead><tr>';
-        $html .= '<th>No</th><th>Nama Node</th><th>Tipe</th><th>Gedung</th><th>Ruangan</th>';
-        $html .= '<th>Pendaftar</th><th>MQTT Topic</th><th>Status</th><th>Tanggal Daftar</th>';
-        $html .= '</tr></thead><tbody>';
+        $rows = '';
 
         foreach ($nodes as $i => $node) {
-            $tipe   = $typeMap[$node->node_type] ?? $node->node_type;
-            $status = $node->status ? '<span class="aktif">Aktif</span>' : '<span class="naktif">Nonaktif</span>';
-            $html .= '<tr>';
-            $html .= '<td>' . ($i+1) . '</td>';
-            $html .= '<td>' . e($node->name) . '</td>';
-            $html .= '<td>' . $tipe . '</td>';
-            $html .= '<td>' . e($node->room?->building?->name ?? '-') . '</td>';
-            $html .= '<td>' . e($node->room?->name ?? '-') . '</td>';
-            $html .= '<td>' . e($node->creator?->name ?? '-') . '<br><small style="color:#6b7280">' . e($node->creator?->email ?? '') . '</small></td>';
-            $html .= '<td class="mono">' . e($node->mqtt_topic) . '</td>';
-            $html .= '<td>' . $status . '</td>';
-            $html .= '<td>' . $node->created_at->format('d M Y H:i') . '</td>';
-            $html .= '</tr>';
-        }
-        $html .= '</tbody></table>';
 
-        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
-        $this->dispatch('open-pdf', pdfBase64: base64_encode($pdf->output()));
+            $rows .= '
+            <tr>
+                <td>'.($i+1).'</td>
+                <td>'.$node->name.'</td>
+                <td>'.($typeMap[$node->node_type] ?? $node->node_type).'</td>
+                <td>'.($node->room?->building?->name ?? '-').'</td>
+                <td>'.($node->room?->name ?? '-').'</td>
+                <td>'.($node->creator?->name ?? '-').'</td>
+                <td>'.$node->mqtt_topic.'</td>
+                <td>'.($node->status ? 'Aktif' : 'Nonaktif').'</td>
+                <td>'.$node->created_at->format('d/m/Y H:i').'</td>
+            </tr>';
+        }
+
+        $html = '
+        <style>
+            body{font-family:sans-serif;font-size:10px}
+            table{width:100%;border-collapse:collapse}
+            th,td{border:1px solid #ddd;padding:5px}
+            th{background:#16a34a;color:white}
+        </style>
+
+        <h2 style="text-align:center">
+            LOG INSTALASI NODE
+        </h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>No</th>
+                    <th>Node</th>
+                    <th>Tipe</th>
+                    <th>Gedung</th>
+                    <th>Ruangan</th>
+                    <th>Pendaftar</th>
+                    <th>MQTT Topic</th>
+                    <th>Status</th>
+                    <th>Tanggal</th>
+                </tr>
+            </thead>
+            <tbody>
+                '.$rows.'
+            </tbody>
+        </table>';
+
+        $pdf = Pdf::loadHTML($html)
+            ->setPaper('a4', 'landscape');
+
+        $filename = 'Log_Instalasi_' . now()->format('d-m-Y') . '.pdf';
+        $pdf      = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+        $output   = $pdf->output();
+
+         return response()->streamDownload(
+            fn() => print($output),
+            $filename,
+            ['Content-Type' => 'application/pdf']
+        );
     }
 
     public function downloadTemplate(): mixed
@@ -157,7 +193,6 @@ new class extends Component {
         );
     }
 
-    // ── IMPORT ──────────────────────────────────────────
     public function importExcel(): void
     {
         $this->validate(['importFile' => 'required|file|mimes:xlsx,xls,csv']);
@@ -235,10 +270,8 @@ new class extends Component {
         @endphp
         <div class="flex items-center gap-4 py-4 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
 
-            {{-- Timeline dot --}}
             <div class="w-3 h-3 rounded-full shrink-0 {{ $node->status ? 'bg-green-500 ring-2 ring-green-500/20' : 'bg-zinc-400 ring-2 ring-zinc-400/20' }}"></div>
 
-            {{-- Info --}}
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{{ $node->name }}</p>
@@ -254,9 +287,15 @@ new class extends Component {
                     › {{ $node->room?->name }}
                 </p>
                 <code class="text-[10px] text-green-500 mt-0.5 block">{{ $node->mqtt_topic }}</code>
+                @if($node->creator)
+                <p class="text-[10px] text-zinc-500 mt-0.5">
+                    <x-icon name="o-user" class="w-3 h-3 inline-block" />
+                    {{ $node->creator->name }}
+                    <span class="text-zinc-400">· {{ $node->creator->email }}</span>
+                </p>
+                @endif
             </div>
 
-            {{-- MQTT Broker --}}
             @if(!empty($node->config['broker']))
             <div class="hidden md:block text-right shrink-0">
                 <p class="text-[11px] font-mono text-zinc-400">{{ $node->config['broker'] }}:{{ $node->config['port'] ?? 1883 }}</p>
@@ -264,7 +303,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Waktu --}}
             <div class="text-right shrink-0">
                 <p class="text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $node->created_at->format('d M Y') }}</p>
                 <p class="text-[10px] text-zinc-400">{{ $node->created_at->format('H:i') }} · {{ $node->created_at->diffForHumans() }}</p>
@@ -314,17 +352,4 @@ new class extends Component {
             <x-button label="Import" wire:click="importExcel" spinner="importExcel" class="btn-primary" :disabled="!$importFile" />
         </x-slot:actions>
     </x-modal>
-
-    <script>
-    document.addEventListener('livewire:initialized', () => {
-        Livewire.on('open-pdf', (event) => {
-            const base64 = event[0]?.pdfBase64 || event.pdfBase64;
-            if (!base64) return;
-            const bytes = atob(base64);
-            const arr   = new Uint8Array([...bytes].map(c => c.charCodeAt(0)));
-            const url   = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
-            if (!window.open(url, '_blank')) alert('Izinkan popup untuk melihat PDF.');
-        });
-    });
-    </script>
 </div>

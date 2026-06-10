@@ -11,12 +11,12 @@ use Livewire\Attributes\Computed;
 new class extends Component {
     use WithPagination;
 
-    public string $search          = '';
-    public ?int   $filterBuilding  = null;
-    public string $filterType      = '';
-    public string $filterStatus    = '';
-    public ?int   $selectedNodeId  = null;
-    public bool   $historyModal    = false;
+    public string $search         = '';
+    public ?int   $filterBuilding = null;
+    public string $filterType     = '';
+    public string $filterStatus   = '';
+    public ?int   $selectedNodeId = null;
+    public bool   $historyModal   = false;
 
     public array $nodeTypes = [
         ['id' => 'temperature', 'name' => 'Suhu & Kelembaban'],
@@ -50,10 +50,8 @@ new class extends Component {
     public function sensors()
     {
         return Node::with(['room.building.client', 'creator'])
-            ->when($this->search, fn($q) =>
-                $q->where('name', 'like', "%{$this->search}%")
-            )
-            ->when($this->filterType,     fn($q) => $q->where('node_type', $this->filterType))
+            ->when($this->search,        fn($q) => $q->where('name', 'like', "%{$this->search}%"))
+            ->when($this->filterType,    fn($q) => $q->where('node_type', $this->filterType))
             ->when($this->filterStatus !== '', fn($q) => $q->where('status', (bool)$this->filterStatus))
             ->when($this->filterBuilding, fn($q) =>
                 $q->whereHas('room', fn($r) => $r->where('building_id', $this->filterBuilding))
@@ -70,7 +68,6 @@ new class extends Component {
             ->values()->toArray();
     }
 
-    // Data terkini per node (dummy)
     public function getLiveValue(Node $node): string
     {
         $mqtt = new MqttService();
@@ -116,10 +113,10 @@ new class extends Component {
         $data   = $readings->map(function($r) use ($node) {
             $p = $r->payload;
             return match($node->node_type) {
-                'temperature' => $p['suhu']     ?? 0,
-                'current'     => $p['arus']      ?? 0,
-                'voltage'     => $p['tegangan']  ?? 0,
-                'light'       => $p['cahaya']    ?? 0,
+                'temperature' => $p['suhu']    ?? 0,
+                'current'     => $p['arus']     ?? 0,
+                'voltage'     => $p['tegangan'] ?? 0,
+                'light'       => $p['cahaya']   ?? 0,
                 default       => 0,
             };
         })->toArray();
@@ -130,20 +127,63 @@ new class extends Component {
 
         return ['labels' => $labels, 'data' => $data, 'unit' => $unit, 'name' => $node->name];
     }
+
+    // ── Export ────────────────────────────────────────────────────────────────
+
+    /**
+     * Simpan filter aktif ke session, lalu redirect ke route download.
+     * Pola ini wajib di Livewire v4 karena response file tidak bisa di-return
+     * langsung dari method component (di-intercept sebagai JSON Livewire).
+     */
+    public function exportPdf(): void
+    {
+        session(['sensor_pdf_filters' => [
+            'search'          => $this->search,
+            'filterBuilding'  => $this->filterBuilding,
+            'filterType'      => $this->filterType,
+            'filterStatus'    => $this->filterStatus,
+        ]]);
+
+        $this->redirect(route('viewer.sensors.export-pdf'), navigate: false);
+    }
+
+    public function exportExcel(): void
+    {
+        session(['sensor_excel_filters' => [
+            'search'          => $this->search,
+            'filterBuilding'  => $this->filterBuilding,
+            'filterType'      => $this->filterType,
+            'filterStatus'    => $this->filterStatus,
+        ]]);
+
+        $this->redirect(route('viewer.sensors.export-excel'), navigate: false);
+    }
 }; ?>
 
 <div>
     <x-header title="List Sensor" subtitle="Semua sensor yang terdaftar di sistem" separator progress-indicator />
 
-    {{-- FILTER --}}
+    {{-- Loading indicator saat export --}}
+    <div wire:loading wire:target="exportPdf,exportExcel" class="mb-3">
+        <x-alert title="Menyiapkan file, harap tunggu..." icon="o-arrow-path" class="alert-info" />
+    </div>
+
+    {{-- FILTER + EXPORT sejajar --}}
     <div class="flex flex-wrap gap-3 mb-4">
         <x-input wire:model.live.debounce.400ms="search" placeholder="Cari nama sensor..." icon="o-magnifying-glass" class="flex-1 min-w-[180px]" clearable />
-        <x-select wire:model.live="filterBuilding" :options="$this->buildings"  placeholder="Semua Gedung" class="w-44" />
-        <x-select wire:model.live="filterType"     :options="$nodeTypes"         placeholder="Semua Tipe"   class="w-40" />
-        <x-select wire:model.live="filterStatus"   :options="$statusOptions"     placeholder="Semua Status" class="w-36" />
+        <x-select wire:model.live="filterBuilding" :options="$this->buildings" placeholder="Semua Gedung" class="w-44" />
+        <x-select wire:model.live="filterType"     :options="$nodeTypes"        placeholder="Semua Tipe"   class="w-40" />
+        <x-select wire:model.live="filterStatus"   :options="$statusOptions"    placeholder="Semua Status" class="w-36" />
         @if($search || $filterBuilding || $filterType || $filterStatus)
-        <x-button label="Reset" wire:click="$set('search',''); $set('filterBuilding',null); $set('filterType',''); $set('filterStatus','')" class="btn-ghost btn-sm" />
+        <x-button label="Reset"
+            wire:click="$set('search',''); $set('filterBuilding',null); $set('filterType',''); $set('filterStatus','')"
+            class="btn-ghost btn-sm" />
         @endif
+        {{-- Tombol export sejajar dengan filter --}}
+        <x-dropdown label="Export" icon="o-arrow-down-tray" class="btn-outline btn-sm" right>
+            <x-menu-item title="Export PDF"   icon="o-document-text" wire:click="exportPdf"   class="text-error" />
+            <x-menu-item title="Export Excel" icon="o-table-cells"   wire:click="exportExcel" class="text-success" />
+        </x-dropdown>
     </div>
 
     <x-card shadow class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
@@ -161,18 +201,28 @@ new class extends Component {
             @endscope
 
             @scope('cell_node_type', $node)
-                @php $b=match($node->node_type){'temperature'=>['Suhu','badge-info'],'current'=>['Arus','badge-warning'],'voltage'=>['Tegangan','badge-error'],'light'=>['Cahaya','badge-success'],default=>[$node->node_type,'badge-ghost']}; @endphp
+                @php $b = match($node->node_type) {
+                    'temperature' => ['Suhu',     'badge-info'],
+                    'current'     => ['Arus',     'badge-warning'],
+                    'voltage'     => ['Tegangan', 'badge-error'],
+                    'light'       => ['Cahaya',   'badge-success'],
+                    default       => [$node->node_type, 'badge-ghost'],
+                }; @endphp
                 <x-badge value="{{ $b[0] }}" class="{{ $b[1] }} badge-outline badge-sm" />
             @endscope
 
-            @scope('cell_building', $node) <span class="text-sm">{{ $node->room?->building?->name ?? '-' }}</span> @endscope
-            @scope('cell_room', $node) <span class="text-sm">{{ $node->room?->name ?? '-' }}</span> @endscope
-            @scope('cell_client', $node) <span class="text-sm">{{ $node->room?->building?->client?->name ?? '-' }}</span> @endscope
+            @scope('cell_building',  $node) <span class="text-sm">{{ $node->room?->building?->name ?? '-' }}</span> @endscope
+            @scope('cell_room',      $node) <span class="text-sm">{{ $node->room?->name ?? '-' }}</span> @endscope
+            @scope('cell_client',    $node) <span class="text-sm">{{ $node->room?->building?->client?->name ?? '-' }}</span> @endscope
 
             @scope('cell_pendaftar', $node)
                 @if($node->creator)
-                <div><p class="text-xs font-medium">{{ $node->creator->name }}</p><p class="text-[10px] text-zinc-400">{{ $node->creator->email }}</p></div>
-                @else <span class="text-xs text-zinc-400">—</span> @endif
+                <div>
+                    <p class="text-xs font-medium">{{ $node->creator->name }}</p>
+                    <p class="text-[10px] text-zinc-400">{{ $node->creator->email }}</p>
+                </div>
+                @else <span class="text-xs text-zinc-400">—</span>
+                @endif
             @endscope
 
             @scope('cell_live_data', $node)
@@ -214,28 +264,36 @@ new class extends Component {
                 chart: null,
                 init() {
                     this.$nextTick(() => {
-                        const el  = document.getElementById('vHistoryChart');
-                        if(!el) return;
-                        const d   = {{ Js::from($this->historyChartData) }};
+                        const el = document.getElementById('vHistoryChart');
+                        if (!el) return;
+                        const d      = {{ Js::from($this->historyChartData) }};
                         const isDark = document.documentElement.classList.contains('dark');
-                        this.chart = new Chart(el, { type:'line', data:{
-                            labels: d.labels,
-                            datasets:[{
-                                label: d.name+' ('+d.unit+')',
-                                data: d.data,
-                                borderColor:'#8b5cf6',
-                                backgroundColor:'rgba(139,92,246,0.08)',
-                                tension:0.4,fill:true,pointRadius:3,
-                            }]
-                        }, options:{responsive:true,
-                            plugins:{legend:{labels:{color:isDark?'#a1a1aa':'#71717a',font:{size:11}}}},
-                            scales:{
-                                x:{ticks:{color:isDark?'#a1a1aa':'#71717a',maxTicksLimit:8},grid:{color:isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)'}},
-                                y:{ticks:{color:isDark?'#a1a1aa':'#71717a'},grid:{color:isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)'},beginAtZero:true}
-                            }}});
+                        const lbl    = isDark ? '#a1a1aa' : '#71717a';
+                        const grid   = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+                        this.chart = new Chart(el, {
+                            type: 'line',
+                            data: {
+                                labels: d.labels,
+                                datasets: [{
+                                    label: d.name + ' (' + d.unit + ')',
+                                    data: d.data,
+                                    borderColor: '#8b5cf6',
+                                    backgroundColor: 'rgba(139,92,246,0.08)',
+                                    tension: 0.4, fill: true, pointRadius: 3,
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: { legend: { labels: { color: lbl, font: { size: 11 } } } },
+                                scales: {
+                                    x: { ticks: { color: lbl, maxTicksLimit: 8 }, grid: { color: grid } },
+                                    y: { ticks: { color: lbl }, grid: { color: grid }, beginAtZero: true }
+                                }
+                            }
+                        });
                     });
                 },
-                destroy() { if(this.chart){try{this.chart.destroy()}catch(e){}} }
+                destroy() { if (this.chart) { try { this.chart.destroy(); } catch(e) {} } }
             }"
             x-init="init()" x-destroy="destroy()"
         >
@@ -243,7 +301,6 @@ new class extends Component {
         </div>
         @endif
 
-        {{-- Tabel history --}}
         <div class="max-h-60 overflow-y-auto">
             <table class="w-full text-xs">
                 <thead class="sticky top-0 bg-zinc-50 dark:bg-zinc-800">
@@ -256,7 +313,7 @@ new class extends Component {
                 <tbody>
                     @forelse($this->historyReadings as $i => $r)
                     @php
-                        $p = $r->payload;
+                        $p   = $r->payload;
                         $val = match($this->selectedNode->node_type) {
                             'temperature' => ($p['suhu']??'—').'°C / '.($p['kelembaban']??'—').'%',
                             'current'     => ($p['arus']??'—').' A',
@@ -266,7 +323,7 @@ new class extends Component {
                         };
                     @endphp
                     <tr class="border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                        <td class="px-3 py-2 text-zinc-400">{{ $i+1 }}</td>
+                        <td class="px-3 py-2 text-zinc-400">{{ $i + 1 }}</td>
                         <td class="px-3 py-2 font-mono font-semibold text-violet-500">{{ $val }}</td>
                         <td class="px-3 py-2 text-zinc-400">{{ \Carbon\Carbon::parse($r->read_at)->format('d M Y H:i:s') }}</td>
                     </tr>

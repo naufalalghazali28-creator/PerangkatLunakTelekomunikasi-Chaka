@@ -16,7 +16,8 @@ class Node extends Model
         'mqtt_topic',
         'config',
         'status',
-        'created_by',   // ← tambahan
+        'created_by',
+        'activated_by',   // ← tambahan
     ];
 
     protected $casts = [
@@ -39,5 +40,15 @@ class Node extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function activator()
+    {
+        return $this->belongsTo(User::class, 'activated_by');
+    }
+
+    public function latestReading()
+    {
+        return $this->hasOne(NodeReading::class)->ofMany('read_at', 'max');
     }
 }

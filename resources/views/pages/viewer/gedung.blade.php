@@ -6,6 +6,8 @@ use App\Models\BEMS\Building;
 use App\Models\BEMS\Node;
 use App\Models\User;
 use Livewire\Attributes\Computed;
+use Maatwebsite\Excel\Facades\Excel;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 new class extends Component {
     use WithPagination;
@@ -15,6 +17,32 @@ new class extends Component {
 
     public function updatedSearch(): void       { $this->resetPage(); }
     public function updatedFilterClient(): void { $this->resetPage(); }
+
+    public function exportExcel()
+    {
+        return Excel::download(
+            new \App\Exports\BuildingExport(
+                $this->search,
+                $this->filterClient
+            ),
+            'Data_Gedung.xlsx'
+        );
+    }
+
+    public function exportPdf()
+    {
+        $buildings = $this->buildings;
+
+        $pdf = Pdf::loadView(
+            'exports.building-pdf',
+            compact('buildings')
+        );
+
+        return response()->streamDownload(
+            fn () => print($pdf->output()),
+            'Data_Gedung.pdf'
+        );
+    }
 
     #[Computed]
     public function buildings()
@@ -57,12 +85,53 @@ new class extends Component {
     <x-header title="List Gedung" subtitle="Semua gedung beserta informasi client, staff, dan sensor" separator progress-indicator />
 
     {{-- FILTER --}}
-    <div class="flex gap-3 mb-4 flex-wrap">
-        <x-input wire:model.live.debounce.400ms="search" placeholder="Cari nama gedung atau client..." icon="o-magnifying-glass" class="flex-1" clearable />
-        <x-select wire:model.live="filterClient" :options="$this->clients" placeholder="Semua Client" class="w-48" />
+    <div class="flex flex-wrap gap-3 mb-4 items-center">
+        <x-input
+            wire:model.live.debounce.400ms="search"
+            placeholder="Cari nama gedung atau client..."
+            icon="o-magnifying-glass"
+            class="flex-1 min-w-[220px]"
+            clearable
+        />
+
+        <x-select
+            wire:model.live="filterClient"
+            :options="$this->clients"
+            placeholder="Semua Client"
+            class="w-48"
+        />
+
         @if($search || $filterClient)
-        <x-button label="Reset" wire:click="$set('search',''); $set('filterClient',null)" class="btn-ghost btn-sm" />
+            <x-button
+                label="Reset"
+                wire:click="$set('search',''); $set('filterClient',null)"
+                class="btn-ghost btn-sm"
+            />
         @endif
+
+        <div class="ml-auto">
+            <x-dropdown
+                label="Export"
+                icon="o-arrow-down-tray"
+                class="btn-outline btn-sm"
+                right
+            >
+                <x-menu-item
+                    title="Export Excel"
+                    icon="o-table-cells"
+                    wire:click="exportExcel"
+                    class="text-success"
+                />
+
+                <x-menu-item
+                    title="Export PDF"
+                    icon="o-document-text"
+                    wire:click="exportPdf"
+                    class="text-error"
+                />
+            </x-dropdown>
+        </div>
+
     </div>
 
     <div class="space-y-4">

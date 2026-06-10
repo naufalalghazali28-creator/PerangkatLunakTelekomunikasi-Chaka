@@ -69,10 +69,15 @@ new class extends Component
     public function dashboardSummary()
     {
         return [
-            'buildings' => Building::count(),
-            'rooms'     => Room::count(),
-            'active'    => Node::where('status', true)->count(),
-            'inactive'  => Node::where('status', false)->count(),
+            'buildings' => Building::query()
+                ->selectRaw('COUNT(DISTINCT LOWER(TRIM(name))) as total')
+                ->value('total'),
+
+            'rooms' => Room::count(),
+
+            'active' => Node::where('status', true)->count(),
+
+            'inactive' => Node::where('status', false)->count(),
         ];
     }
 
@@ -191,6 +196,26 @@ new class extends Component
         $this->editModal = false;
     }
 
+    public function deleteRoom($roomId)
+    {
+        $room = Room::find($roomId);
+
+        if (!$room) {
+            $this->error('Data ruangan tidak ditemukan');
+            return;
+        }
+
+        // Cek apakah masih ada node
+        if ($room->nodes()->count() > 0) {
+            $this->error('Ruangan tidak dapat dihapus karena masih memiliki node.');
+            return;
+        }
+
+        $room->delete();
+
+        $this->success('Ruangan berhasil dihapus');
+    }
+
     // ── Export ───────────────────────────────────────────
     public function exportExcel()
     {
@@ -234,68 +259,80 @@ new class extends Component
         );
     }
    
-    public function exportPdf($chartImg1 = null, $chartImg2 = null, $chartImg3 = null)
-    { 
-        \Log::info('EXPORT PDF DIPANGGIL');
-        $rooms   = Room::with(['building.client'])
-            ->withCount(['nodes', 'nodes as active_nodes_count' => fn($q) => $q->where('status', true)])
+    public function exportPdf(): mixed
+    {
+        $rooms = Room::with(['building.client'])
+            ->withCount([
+                'nodes',
+                'nodes as active_nodes_count' => fn($q) => $q->where('status', true),
+            ])
             ->when($this->search, fn($q) =>
                 $q->where('name', 'like', "%{$this->search}%")
                   ->orWhereHas('building', fn($b) => $b->where('name', 'like', "%{$this->search}%"))
-            )->latest()->get();
+            )
+            ->latest()->get();
 
-        $summary = $this->nodeSummary;
+        $s    = $this->nodeSummary;
+        $now  = now()->format('d/m/Y H:i');
+        $count = $rooms->count();
 
-        $html  = '<style>';
-        $html .= 'body{font-family:sans-serif;font-size:10px;color:#333}';
-        $html .= 'h2{text-align:center;font-size:13px;margin-bottom:2px}';
-        $html .= 'p.sub{text-align:center;color:#888;margin:0 0 10px;font-size:9px}';
-        $html .= '.stats{display:flex;gap:16px;margin-bottom:12px}';
-        $html .= '.stat{flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;text-align:center}';
-        $html .= '.val{font-size:18px;font-weight:bold}.lbl{font-size:8px;color:#6b7280}';
-        $html .= '.charts{text-align:center;margin-bottom:10px}';
-        $html .= '.charts img{width:30%;display:inline-block;margin:0 1%}';
-        $html .= 'table{width:100%;border-collapse:collapse}';
-        $html .= 'th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}';
-        $html .= 'th{background:#16a34a;color:#fff;font-size:9px;text-transform:uppercase}';
-        $html .= 'tr:nth-child(even){background:#f9fafb}';
-        $html .= '.blue{color:#2563eb;font-weight:bold}';
-        $html .= '</style>';
-        $html .= '<h2>LAPORAN MANAJEMEN GEDUNG & SENSOR</h2>';
-        $html .= '<p class="sub">Tanggal Cetak: ' . now()->format('d/m/Y H:i') . '</p>';
-        $html .= '<div class="stats">';
-        $html .= '<div class="stat"><div class="val">' . $summary['total'] . '</div><div class="lbl">Total Node</div></div>';
-        $html .= '<div class="stat"><div class="val" style="color:#2563eb">' . $summary['active'] . '</div><div class="lbl">Node Aktif</div></div>';
-        $html .= '<div class="stat"><div class="val" style="color:#6b7280">' . $summary['inactive'] . '</div><div class="lbl">Node Nonaktif</div></div>';
-        $html .= '<div class="stat"><div class="val">' . $rooms->count() . '</div><div class="lbl">Total Ruangan</div></div>';
-        $html .= '</div>';
-
-        if ($chartImg1 || $chartImg2 || $chartImg3) {
-            $html .= '<div class="charts">';
-            if ($chartImg1) $html .= '<img src="' . $chartImg1 . '">';
-            if ($chartImg2) $html .= '<img src="' . $chartImg2 . '">';
-            if ($chartImg3) $html .= '<img src="' . $chartImg3 . '">';
-            $html .= '</div>';
+        $rows = '';
+        foreach ($rooms as $i => $r) {
+            $rows .= '<tr>'
+                . '<td>' . ($i + 1) . '</td>'
+                . '<td>' . e($r->building->name ?? '-') . '</td>'
+                . '<td>' . $r->floor . '</td>'
+                . '<td>' . e($r->name) . '</td>'
+                . '<td>' . e($r->building->client->name ?? '-') . '</td>'
+                . '<td>' . $r->nodes_count . '</td>'
+                . '<td class="blue">' . $r->active_nodes_count . '</td>'
+                . '</tr>';
         }
 
-        $html .= '<table><thead><tr>';
-        $html .= '<th>No</th><th>Gedung</th><th>Lantai</th><th>Ruangan</th><th>Client</th><th>Total Node</th><th>Node Aktif</th>';
-        $html .= '</tr></thead><tbody>';
-        foreach ($rooms as $i => $room) {
-            $html .= '<tr>';
-            $html .= '<td>' . ($i+1) . '</td>';
-            $html .= '<td>' . e($room->building->name ?? '-') . '</td>';
-            $html .= '<td>' . $room->floor . '</td>';
-            $html .= '<td>' . e($room->name) . '</td>';
-            $html .= '<td>' . e($room->building->client->name ?? '-') . '</td>';
-            $html .= '<td>' . $room->nodes_count . '</td>';
-            $html .= '<td class="blue">' . $room->active_nodes_count . '</td>';
-            $html .= '</tr>';
-        }
-        $html .= '</tbody></table>';
+        $css = '
+            body{font-family:sans-serif;font-size:10px;color:#333}
+            h2{text-align:center;font-size:13px;margin:0 0 2px}
+            p.sub{text-align:center;color:#888;font-size:9px;margin:0 0 10px}
+            .stats{display:flex;gap:12px;margin-bottom:12px}
+            .stat{flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:6px;text-align:center}
+            .val{font-size:18px;font-weight:bold}
+            .lbl{font-size:8px;color:#6b7280}
+            table{width:100%;border-collapse:collapse}
+            th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}
+            th{background:#16a34a;color:#fff;font-size:9px;text-transform:uppercase}
+            tr:nth-child(even){background:#f9fafb}
+            .blue{color:#2563eb;font-weight:bold}
+        ';
 
-        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
-        $this->dispatch('open-pdf', pdfBase64: base64_encode($pdf->output()));
+        $html = "
+        <style>{$css}</style>
+        <h2>LAPORAN MANAJEMEN GEDUNG &amp; SENSOR</h2>
+        <p class='sub'>Tanggal Cetak: {$now}</p>
+        <div class='stats'>
+            <div class='stat'><div class='val'>{$s['total']}</div><div class='lbl'>Total Node</div></div>
+            <div class='stat'><div class='val' style='color:#2563eb'>{$s['active']}</div><div class='lbl'>Node Aktif</div></div>
+            <div class='stat'><div class='val' style='color:#6b7280'>{$s['inactive']}</div><div class='lbl'>Node Nonaktif</div></div>
+            <div class='stat'><div class='val'>{$count}</div><div class='lbl'>Total Ruangan</div></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>No</th><th>Gedung</th><th>Lantai</th><th>Ruangan</th>
+                    <th>Client</th><th>Total Node</th><th>Node Aktif</th>
+                </tr>
+            </thead>
+            <tbody>{$rows}</tbody>
+        </table>";
+
+        $filename = 'Laporan_Gedung_' . now()->format('d-m-Y') . '.pdf';
+        $pdf      = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+        $output   = $pdf->output();
+
+        return response()->streamDownload(
+            fn() => print($output),
+            $filename,
+            ['Content-Type' => 'application/pdf']
+        );
     }
 
     #[Computed]
@@ -650,9 +687,21 @@ new class extends Component
             @endscope
 
             @scope('cell_action', $room)
-                <x-button icon="o-pencil" wire:click="editRoom({{ $room->id }})"
-                    class="btn-ghost btn-sm hover:bg-blue-500/10 hover:text-blue-500" />
-            @endscope
+            <div class="flex gap-1">
+                <x-button
+                    icon="o-pencil"
+                    wire:click="editRoom({{ $room->id }})"
+                    class="btn-ghost btn-sm hover:bg-blue-500/10 hover:text-blue-500"
+                />
+
+                <x-button
+                    icon="o-trash"
+                    wire:click="deleteRoom({{ $room->id }})"
+                    wire:confirm="Yakin ingin menghapus ruangan ini?"
+                    class="btn-ghost btn-sm hover:bg-red-500/10 hover:text-red-500"
+                />
+            </div>
+        @endscope
         </x-table>
     </x-card>
 

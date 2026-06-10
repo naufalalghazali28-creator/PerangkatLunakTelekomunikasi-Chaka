@@ -82,11 +82,11 @@
     <div class="h-16 px-3 border-b border-zinc-900 flex items-center justify-between shrink-0">
         <div class="flex items-center min-w-0" :class="open ? 'gap-3' : 'w-full justify-center'">
             <div class="w-9 h-9 rounded-xl bg-gradient-to-br {{ $accentBg }} flex items-center justify-center shadow-lg shrink-0">
-                <span class="text-black font-black text-sm">C</span>
+                <span class="text-black font-black text-sm">T</span>
             </div>
             <div x-show="open" x-transition:enter="transition-opacity duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-cloak class="leading-tight overflow-hidden">
-                <p class="font-bold text-white text-sm tracking-wide">CHAKA</p>
-                <p class="text-[10px] text-zinc-500">Telecom Dashboard</p>
+                <p class="font-bold text-white text-sm tracking-wide">Electrical</p>
+                <p class="text-[10px] text-zinc-500">Telecomunication</p>
             </div>
         </div>
         <button x-show="open" @click="open = false" class="w-8 h-8 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-all shrink-0">

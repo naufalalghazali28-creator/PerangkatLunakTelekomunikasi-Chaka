@@ -75,22 +75,21 @@ new class extends Component {
         ];
     }
 
-    /**
-     * Struktur data untuk GROUPED HORIZONTAL BAR (seperti gambar referensi).
-     * Label = nama node (sumbu Y), dataset = tiap tipe sensor (warna berbeda).
-     * Setiap dataset hanya mengisi nilai pada node yang sesuai tipenya, sisanya null
-     * agar bar tidak ditumpuk tapi dikelompokkan per node.
-     */
     #[Computed]
     public function allSensorData()
     {
         $nodes = Node::with('room.building')->where('status', true)->get();
         if ($nodes->isEmpty()) return [];
 
-        $mqtt   = new MqttService();
-        $labels = $nodes->map(fn($n) => substr($n->name, 0, 14) . (strlen($n->name) > 14 ? '…' : ''))->toArray();
+        $mqtt = new MqttService();
 
-        // Kumpulkan nilai per node
+        // FIX LABEL: "Gedung › Ruangan" sebagai label sumbu Y
+        $labels = $nodes->map(function ($n) {
+            $building = $n->room?->building?->name ?? '—';
+            $room     = $n->room?->name ?? '—';
+            return $building . ' › ' . $room;
+        })->toArray();
+
         $values = $nodes->map(function ($node) use ($mqtt) {
             $d = $mqtt->generateDummyPayload($node->node_type);
             return [
@@ -105,18 +104,16 @@ new class extends Component {
             ];
         });
 
-        // Buat satu dataset per tipe sensor — nilai null pada node yang bukan tipenya
         $typeMap = [
-            'temperature' => ['label' => 'Suhu (°C)',     'color' => '#3b82f6'],
-            'current'     => ['label' => 'Arus (A)',      'color' => '#f59e0b'],
-            'voltage'     => ['label' => 'Tegangan (V)',  'color' => '#ef4444'],
-            'light'       => ['label' => 'Cahaya (lux)',  'color' => '#22c55e'],
+            'temperature' => ['label' => 'Suhu (°C)',    'color' => '#3b82f6'],
+            'current'     => ['label' => 'Arus (A)',     'color' => '#f59e0b'],
+            'voltage'     => ['label' => 'Tegangan (V)', 'color' => '#ef4444'],
+            'light'       => ['label' => 'Cahaya (lux)', 'color' => '#22c55e'],
         ];
 
         $datasets = [];
         foreach ($typeMap as $type => $meta) {
             $data = $values->map(fn($v) => $v['type'] === $type ? $v['value'] : null)->toArray();
-            // Hanya masukkan dataset jika ada minimal satu nilai
             if (collect($data)->filter(fn($v) => $v !== null)->isNotEmpty()) {
                 $datasets[] = [
                     'label'           => $meta['label'],
@@ -125,7 +122,7 @@ new class extends Component {
                     'borderColor'     => $meta['color'],
                     'borderWidth'     => 0,
                     'borderRadius'    => 3,
-                    'barThickness'    => 10,
+                    'barThickness'    => 14,
                 ];
             }
         }
@@ -187,12 +184,20 @@ new class extends Component {
             'room'     => $node->room?->name ?? '-',
         ];
     }
+
+    /**
+     * Dipanggil saat selectedNodeId berubah via dropdown.
+     * Dispatch event ke Alpine untuk trigger rebuild chart single saja.
+     */
+    public function updatedSelectedNodeId(): void
+    {
+        $this->dispatch('sensor-changed');
+    }
 }; ?>
 
 <div
     x-data="{
         charts: {},
-        componentId: '{{ $this->getId() }}',
 
         waitForChart(cb) {
             if (typeof Chart !== 'undefined') { cb(); return; }
@@ -204,22 +209,27 @@ new class extends Component {
         },
 
         init() {
+            // Build semua chart saat pertama load
             this.$nextTick(() => this.waitForChart(() => this.buildAll()));
 
             /*
-             * FIX UTAMA untuk chart hilang saat dropdown berubah:
-             * Gunakan Livewire.hook 'commit' yang menyediakan component instance.
-             * Dengan mengecek component.id === this.componentId, kita HANYA rebuild
-             * chart milik komponen ini — tidak terganggu update komponen Livewire lain.
+             * FIX BUG DROPDOWN:
+             * Dengarkan event 'sensor-changed' yang di-dispatch PHP saat selectedNodeId berubah.
+             * Pendekatan ini 100% reliable karena event datang SETELAH Livewire selesai
+             * update DOM — tidak perlu polling, tidak perlu hook Livewire yang tidak stabil.
+             *
+             * Hanya rebuild chart yang terpengaruh (single), bukan destroyAll() total
+             * sehingga chart donut dan stacked bar tetap utuh.
              */
-            Livewire.hook('commit', ({ component, succeed }) => {
-                if (component.id !== this.componentId) return;
-                succeed(() => {
-                    this.$nextTick(() => {
-                        this.waitForChart(() => {
-                            this.destroyAll();
-                            this.buildAll();
-                        });
+            this.$wire.on('sensor-changed', () => {
+                this.$nextTick(() => {
+                    this.waitForChart(() => {
+                        // Hancurkan hanya chart single, biarkan yang lain
+                        if (this.charts.single) {
+                            try { this.charts.single.destroy(); } catch(e) {}
+                            delete this.charts.single;
+                        }
+                        this.buildSingle();
                     });
                 });
             });
@@ -265,23 +275,18 @@ new class extends Component {
             });
         },
 
-        /*
-         * Grouped horizontal bar — seperti gambar referensi.
-         * indexAxis: 'y'  → bar horizontal
-         * grouped (bukan stacked) → tiap node punya beberapa bar warna berbeda per tipe sensor
-         */
         buildStacked() {
             const el = document.getElementById('vChartStacked');
             if (!el) return;
             const d = {{ Js::from($this->allSensorData) }};
             if (!d || !d.datasets || !d.datasets.length) return;
-
             this.charts.stacked = new Chart(el, {
                 type: 'bar',
                 data: { labels: d.labels, datasets: d.datasets },
                 options: {
-                    indexAxis: 'y',         // ← horizontal bar
+                    indexAxis: 'y',
                     responsive: true,
+                    maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: {
@@ -291,7 +296,7 @@ new class extends Component {
                     },
                     scales: {
                         x: {
-                            stacked: false,     // grouped, bukan stacked
+                            stacked: false,
                             beginAtZero: true,
                             ticks: { color: this.lbl() },
                             grid:  { color: this.grid() }
@@ -311,7 +316,6 @@ new class extends Component {
             if (!el) return;
             const d = {{ Js::from($this->singleSensorData) }};
             if (!d || !d.labels || !d.labels.length) return;
-
             this.charts.single = new Chart(el, {
                 type: 'line',
                 data: {
@@ -408,14 +412,10 @@ new class extends Component {
 
     @if($this->summary['active'] > 0)
 
-    {{-- ROW 2: Grouped Horizontal Bar semua sensor --}}
+    {{-- ROW 2: Grouped Horizontal Bar --}}
     <x-card title="Data Semua Sensor Aktif" subtitle="Perbandingan nilai tiap sensor — dikelompokkan per tipe"
         shadow class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl mb-4">
-        {{--
-            Tinggi canvas disesuaikan dengan jumlah node agar bar tidak terlalu rapat.
-            min-height cukup untuk 3 node, sisanya mengembang otomatis.
-        --}}
-        <div style="min-height: {{ max(160, count($this->activeNodeOptions) * 52) }}px; position:relative">
+        <div style="height: {{ max(180, count($this->activeNodeOptions) * 56) }}px; position: relative;">
             <canvas id="vChartStacked" wire:key="chart-stacked"></canvas>
         </div>
     </x-card>
@@ -448,6 +448,11 @@ new class extends Component {
                     <span class="font-semibold">Satuan:</span> {{ $sd['unit'] }}
                 </span>
             </div>
+            {{--
+                wire:key berubah setiap sensor ganti → Livewire hancurkan canvas lama
+                dan buat canvas baru → buildSingle() menemukan canvas fresh tanpa
+                instance Chart.js lama yang menempel.
+            --}}
             <canvas
                 id="vChartSingle"
                 wire:key="chart-single-{{ $selectedNodeId }}"
